@@ -1,0 +1,9 @@
+# Local runtime data, including the station encryption seed.
+/station/station_data/
+/hand_control/.venv/
+/hand_control/.sdk/
+/hand_control/.pip.pyz
+__pycache__/
+
+# Local multi-agent worktrees and coordination.
+/.hackathon/

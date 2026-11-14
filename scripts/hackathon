@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+STATE="$ROOT/.hackathon"
+export HACKATHON_ROOT="$ROOT"
+roles=(pilotage robot donnees integration)
+setup() {
+  mkdir -p "$STATE/worktrees" "$STATE/coordination"
+  for role in "${roles[@]}"; do
+    path="$STATE/worktrees/$role"
+    if [[ ! -e "$path" ]]; then
+      if git -C "$ROOT" show-ref --verify --quiet "refs/heads/hackathon/$role"; then
+        git -C "$ROOT" worktree add "$path" "hackathon/$role"
+      else
+        git -C "$ROOT" worktree add -b "hackathon/$role" "$path" HEAD
+      fi
+    fi
+    [[ "$(git -C "$path" symbolic-ref --short HEAD)" == "hackathon/$role" ]] || { echo "Branche inattendue : $path" >&2; exit 1; }
+    if [[ ! -e "$path/AGENTS.md" ]]; then cp "$ROOT/AGENTS.md" "$path/AGENTS.md"; fi
+    if [[ ! -e "$STATE/coordination/$role.md" ]]; then
+      printf '# %s\n\nStatut : libre\nMission : à définir\nBase : %s\nChemins : aucun\nSHA livré : aucun\nTests : aucun\nRisques : à évaluer\nProchaine action : attendre une mission\n' "$role" "$(git -C "$path" rev-parse --short HEAD)" > "$STATE/coordination/$role.md"
+    fi
+  done
+  if [[ ! -e "$STATE/coordination/BOARD.md" ]]; then printf '# Missions\n\nAucune mission assignée.\n' > "$STATE/coordination/BOARD.md"; fi
+}
+case "${1:-start}" in
+  setup) setup ;;
+  start)
+    for dependency in git tmux tmuxinator lazygit codex; do
+      command -v "$dependency" >/dev/null || { echo "Dépendance manquante : $dependency" >&2; exit 1; }
+    done
+    setup
+    exec tmuxinator start -p "$ROOT/.tmuxinator/hackathon.yml"
+    ;;
+  agent)
+    role="${2:?Usage: scripts/hackathon agent ROLE}"
+    case "$role" in pilotage|robot|donnees|integration) ;; *) echo 'Rôle inconnu' >&2; exit 1 ;; esac
+    export HACKATHON_ROLE="$role"
+    cd "$STATE/worktrees/$role"
+    exec codex -c 'model_reasoning_effort="medium"' "Tu es l'orchestrateur $role. Lis AGENTS.md, puis $ROOT/docs/agents/WORKFLOW.md et $STATE/coordination/BOARD.md et ton fichier $STATE/coordination/$role.md. Applique ces règles. Attends ma mission avant de travailler. Rapports courts ; délégation bornée seulement si utile."
+    ;;
+  *) echo 'Usage: scripts/hackathon {setup|start|agent ROLE}' >&2; exit 1 ;;
+esac
