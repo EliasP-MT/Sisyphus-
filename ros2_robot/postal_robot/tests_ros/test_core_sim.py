@@ -112,7 +112,8 @@ class CoreSimTest(unittest.TestCase):
         cls.core = subprocess.Popen(
             ['ros2', 'run', 'postal_robot', 'core', '--ros-args', '-r', '__ns:=/robot',
              '-p', 'device:=sim://', '-p', f'calibration:={d}/cal.json', '-p', f'poses:={d}/poses.json',
-             '-p', 'lease_timeout_s:=0.8'], stdout=open(d / 'core.log', 'w'), stderr=subprocess.STDOUT)
+             '-p', 'lease_timeout_s:=0.8'], stdout=open(d / 'core.log', 'w'), stderr=subprocess.STDOUT,
+            env=dict(os.environ, POSTAL_SIM_FAULTS=str(d / 'faults')))
         rclpy.init()
         cls.h = Harness()
         cls.executor = MultiThreadedExecutor()
@@ -293,11 +294,26 @@ class CoreSimTest(unittest.TestCase):
         self.assertFalse(any(self.h.motors[i].torque_enabled for i in (9, 10, 11, 12)))
         self.assertEqual(held, [self.h.motors[i].position_ticks for i in range(1, 8)])
 
+    def test_92_overload_fault_then_full_torque_removal(self):
+        self.activate()
+        self.assertTrue(self.h.call('set_torque', group='arm', enable=True).success)
+        self.assertTrue(wait(lambda: all(self.h.motors[i].torque_enabled for i in range(1, 9))))
+        (Path(self.dir.name) / 'faults').write_text('2:0x20')
+        self.assertTrue(wait(lambda: self.h.state.state_name == 'FAULT', 3))
+        self.assertIn('ID 2', self.h.state.faults[0])
+        self.assertFalse(self.h.call('supervisor/acknowledge', session_id=self.h.session).success)
+        r = self.h.call('set_torque', group='arm', enable=False, confirm_arm_unsupported=True)
+        self.assertTrue(r.success, r.message)
+        self.assertIn('flags', r.message)
+        self.assertTrue(wait(lambda: not any(self.h.motors[i].torque_enabled for i in range(1, 9)), 2))
+        self.assertTrue(self.h.call('supervisor/acknowledge', session_id=self.h.session).success)
+        self.assertTrue(self.h.call('set_torque', group='arm', enable=True).success)
+
     def test_9_gripper_range(self):
         self.activate()
         self.assertFalse(self.h.call('gripper/set', ticks=100).success)
         r = self.h.call('gripper/set', ticks=1600)
-        self.assertTrue(r.success, r.message)
+        self.assertTrue(r.success, r.message + ' ' + str(self.h.state.faults))
         self.assertTrue(wait(lambda: abs(self.h.motors[8].position_ticks - 1600) <= 2, 5))
 
 
