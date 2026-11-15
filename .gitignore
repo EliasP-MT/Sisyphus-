@@ -6,3 +6,4 @@
 __pycache__/
 
 # Local multi-agent worktrees and coordination.
+/.hackathon/
