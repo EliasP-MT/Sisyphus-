@@ -301,7 +301,12 @@ class Core(Node):
             values.append(self.calibration.to_radians(name, m.data['position']))
         return values
 
-    def _write(self, motor_id, address, value):
+    def _write(self, motor_id, address, value, tolerate_status=False):
+        """Write one register. A non-zero reply status carries the servo error
+        flags (e.g. 0x20 overload); the write itself was executed. Motion writes
+        treat it as a failure; stop/disable writes tolerate it so that every
+        servo of the group still receives the stop (the fault is reported by
+        feedback monitoring)."""
         if self.bus is None:
             raise BusError('Serial bus unavailable')
         try:
@@ -309,8 +314,9 @@ class Core(Node):
         except OSError as exc:
             self._bus_lost(exc)
             raise BusError(str(exc)) from exc
-        if status:
+        if status and not tolerate_status:
             raise BusError(f'ID {motor_id}: write returned status 0x{status:02x}')
+        return status
 
     # ------------------------------------------------------------------ supervision
     def _supervise(self):
@@ -366,7 +372,7 @@ class Core(Node):
             if self._fresh(m) and not m.data['torque_enabled']:
                 continue
             try:
-                self._write(i, st3215.GOAL_SPEED, 0)
+                self._write(i, st3215.GOAL_SPEED, 0, tolerate_status=True)
             except BusError as exc:
                 errors.append(f'ID {i}: stop failed: {exc}')
         return errors
@@ -386,7 +392,7 @@ class Core(Node):
                 errors.append(f'ID {i}: cannot hold at measured position (stale); last goal kept')
                 continue
             try:
-                self._write(i, st3215.GOAL_POSITION, m.data['position'])
+                self._write(i, st3215.GOAL_POSITION, m.data['position'], tolerate_status=True)
             except BusError as exc:
                 errors.append(f'ID {i}: hold failed: {exc}')
         return errors
@@ -446,7 +452,7 @@ class Core(Node):
         if time.monotonic() >= self.dispenser_deadline or not self.supervisor.commands_allowed():
             self.dispenser_deadline = None
             try:
-                self._write(self.dispenser_id, st3215.GOAL_SPEED, 0)
+                self._write(self.dispenser_id, st3215.GOAL_SPEED, 0, tolerate_status=True)
             except BusError as exc:
                 if self.supervisor.fault(f'dispenser stop failed: {exc}'):
                     self._safe_stop('dispenser stop failure')
@@ -637,19 +643,42 @@ class Core(Node):
                         speed = self.cfg['gripper_speed_ticks_s'] if i == self.gripper_id else c['servo_speed_ticks_s']
                         self._write(i, st3215.GOAL_SPEED, speed)
                         self._write(i, st3215.ACCELERATION, c['servo_acceleration'])
-                for i in ARM_IDS:
-                    self._write(i, st3215.TORQUE_ENABLE, int(request.enable))
-            else:
+                if request.enable:
+                    for i in ARM_IDS:
+                        self._write(i, st3215.TORQUE_ENABLE, 1)
+                    return 'arm torque enabled (confirm in motor feedback)'
+                return self._disable(ARM_IDS, group)
+            if request.enable:
                 for i in self.groups[group]:
                     self._write(i, st3215.GOAL_SPEED, 0)
-                if group == 'base':
-                    self.wheel_target = [0, 0, 0]
-                else:
-                    self.dispenser_deadline = None
                 for i in self.groups[group]:
-                    self._write(i, st3215.TORQUE_ENABLE, int(request.enable))
-            return f'{group} torque {"enabled" if request.enable else "disabled"} (confirm in motor feedback)'
+                    self._write(i, st3215.TORQUE_ENABLE, 1)
+                return f'{group} torque enabled (confirm in motor feedback)'
+            if group == 'base':
+                self.wheel_target = [0, 0, 0]
+            else:
+                self.dispenser_deadline = None
+            return self._disable(self.groups[group], group, zero_speed=True)
         return self._respond(response, act)
+
+    def _disable(self, ids, group, zero_speed=False):
+        """Remove torque from EVERY servo of the group, even if some reply with
+        error flags or fail; report them afterwards."""
+        flagged, failed = [], []
+        for i in ids:
+            try:
+                status = 0
+                if zero_speed:
+                    status |= self._write(i, st3215.GOAL_SPEED, 0, tolerate_status=True) or 0
+                status |= self._write(i, st3215.TORQUE_ENABLE, 0, tolerate_status=True) or 0
+                if status:
+                    flagged.append(f'ID {i} flags 0x{status:02x}')
+            except BusError as exc:
+                failed.append(str(exc))
+        if failed:
+            raise BusError(f'{group} torque NOT removed everywhere: ' + '; '.join(failed + flagged))
+        return f'{group} torque disabled' + (f' (servo flags: {", ".join(flagged)})' if flagged else '') \
+            + ' (confirm in motor feedback)'
 
     def on_dispense(self, request, response):
         def act():

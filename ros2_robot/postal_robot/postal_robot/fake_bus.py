@@ -4,6 +4,7 @@ Used by integration tests on the PC. It is never a source of hardware
 feedback: the core reports "SIMULATED SERIAL BUS" in every supervisor state
 message while it is in use.
 """
+import os
 import threading
 import time
 
@@ -56,6 +57,17 @@ class FakeTransport:
         self.lock = threading.Lock()
         self.pending = b''
 
+    def _inject_faults(self):
+        """Tests only: POSTAL_SIM_FAULTS names a file of 'id:flags' lines, consumed once."""
+        path = os.environ.get('POSTAL_SIM_FAULTS')
+        if path and os.path.exists(path):
+            with open(path) as handle:
+                lines = handle.read().split()
+            os.unlink(path)
+            for line in lines:
+                motor_id, flags = (int(v, 0) for v in line.split(':'))
+                self.servos[motor_id].mem[0x41] = flags
+
     def reset_input_buffer(self):
         self.pending = b''
 
@@ -68,19 +80,23 @@ class FakeTransport:
         if servo is None or servo.silent:
             return
         with self.lock:
+            self._inject_faults()
             servo.update()
+            status = servo.mem[0x41]  # reply reports the flags present when the packet arrived
             if instruction == st3215.INST_READ:
                 address, size = params
                 payload = bytes(servo.mem[address:address + size])
             elif instruction == st3215.INST_WRITE:
                 address = params[0]
                 servo.mem[address:address + len(params) - 1] = params[1:]
+                if address == st3215.TORQUE_ENABLE and params[1] == 0:
+                    servo.mem[0x41] &= ~0x20  # as observed: torque off clears overload
                 if address in (st3215.GOAL_POSITION, st3215.GOAL_SPEED):
                     servo.mem[st3215.TORQUE_ENABLE] = 1  # as the real ST3215: a goal write energizes
                 payload = b''
             else:
                 return
-        body = bytes([motor_id, len(payload) + 2, 0]) + payload
+        body = bytes([motor_id, len(payload) + 2, status]) + payload
         self.pending = b'\xff\xff' + body + bytes([st3215.checksum(body)])
 
     def read(self, size):
