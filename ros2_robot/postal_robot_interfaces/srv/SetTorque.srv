@@ -1,0 +1,6 @@
+string group                  # arm | base | dispenser
+bool enable
+bool confirm_arm_unsupported  # required to disable arm torque: the arm can fall
+---
+bool success
+string message

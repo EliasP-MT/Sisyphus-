@@ -1,0 +1,6 @@
+string name
+bool replace          # replacing keeps a timestamped backup of the pose file
+---
+bool success
+string message
+PoseInfo pose

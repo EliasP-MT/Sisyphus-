@@ -1,0 +1,43 @@
+# Robot core parameters. Hardware facts confirmed by the user / measured:
+# wheel radius 0.05 m, centre-wheel 0.125 m, IDs arm 1-8, wheels 11 left /
+# 12 back / 9 right, dispenser 10 (speed -1000 in the teleop.py sign-magnitude
+# convention). Calibration and pose files live outside Git (see deploy/).
+/robot/core:
+  ros__parameters:
+    device: /dev/serial/by-id/usb-1a86_USB_Single_Serial_5B8E114718-if00
+    period_s: 0.05
+    feedback_max_age_s: 0.3
+    lease_timeout_s: 0.8
+    wheel_ids: [11, 12, 9]          # left, back, right (never the old 7/8 IDs)
+    wheel_signs: [1, 1, 1]          # LeKiwi convention; verify on hardware
+    base_direction_verified: false  # true only after the lifted-wheel test
+    wheel_radius_m: 0.05
+    base_radius_m: 0.125
+    wheel_mount_deg: [240.0, 0.0, 120.0]
+    max_wheel_raw: 1500
+    max_linear_m_s: 0.15
+    max_angular_rad_s: 0.6
+    cmd_timeout_s: 0.3
+    dispenser_id: 10
+    dispenser_default_speed: -1000
+    dispenser_max_duration_s: 10.0
+    gripper_id: 8
+    gripper_min_ticks: 1268         # Station calibration range of motor 8
+    gripper_max_ticks: 2828
+    gripper_speed_ticks_s: 200
+    start_tolerance_rad: 0.02
+    arrival_tolerance_rad: 0.01
+    arrival_timeout_s: 5.0
+    publish_odom_tf: false          # the navigation merge decides who owns odom TF
+/robot/camera_1/camera:
+  ros__parameters:
+    device: /dev/v4l/by-id/usb-GENERAL_GENERAL_WEBCAM_JH0319_20210712_v102-video-index0
+    frame_id: camera_1_optical_frame
+    fps: 5.0
+    jpeg_quality: 60
+/robot/camera_2/camera:
+  ros__parameters:
+    device: /dev/v4l/by-id/usb-Sonix_Technology_Co.__Ltd._KD-USB_Cameras_KD-USB_Cameras-video-index0
+    frame_id: camera_2_optical_frame
+    fps: 5.0
+    jpeg_quality: 60

@@ -1,0 +1,6 @@
+# Clears AWAITING_ACK / latched faults once their cause is gone. Requires a fresh lease
+# from the same session. Never replays commands received before acknowledgement.
+string session_id
+---
+bool success
+string message
