@@ -1,26 +1,25 @@
 # humanoid-hackathon
 
-## RDK arm control
+## Robot runtime (ROS 2)
 
-See [Station on RDK X5](station/RDK.md) for installation, browser access, and the
-existing teleoperation client. Start from the laptop with:
+The robot runs ROS 2 Humble on its RDK X5; the PC hosts the control station
+(local web UI, RViz, collision-checked arm planning). See
+[ros2_robot/README.md](ros2_robot/README.md) and the full
+[migration document](docs/ROS2_MIGRATION.md).
 
 ```bash
-bash station/remote-rdk.sh
+RDK_HOST=sunrise@172.20.10.3 bash ros2_robot/deploy/deploy_robot.sh --restart   # robot
+ROBOT_WIFI_IP=172.20.10.3 bash ros2_robot/deploy/station.sh                      # PC, then http://127.0.0.1:8895/
 ```
 
-The RDK Station UI is at http://127.0.0.1:18889; the laptop Station UI remains on
-8889. Run only one controller per physical servo adapter.
+The arm uses IDs **1–8**, the dispenser servo **10**, and wheels **11 left / 12 back /
+9 right**. See [hardware and Ethernet troubleshooting](RDK-TROUBLESHOOTING.md).
 
-The arm uses IDs **1–8**, the extra servo **10**, and wheels **11 left / 12 back /
-9 right**. Older rover code must be updated before driving with this mapping.
-See [hardware and Ethernet troubleshooting](RDK-TROUBLESHOOTING.md).
+## Arm planning and collision libraries
 
-## Arm path planning
-
-[arm_control/README.md](arm_control/README.md) documents Cartesian waypoint
-planning, STEP-based collision checking, commissioning and guarded Station
-execution, integrated from `martin_fall` at `d11b446`. It reuses the transport
-in [hand_control/](hand_control/README.md). Example configurations are deliberately
-uncommissioned: verify joint mapping, calibration and scene registration before
-enabling hardware execution. No robot deployment or motion is part of integration.
+[arm_control/](arm_control/README.md) holds the planning (IK, Ruckig timing),
+STEP/surface CAD import and PyBullet/OMPL collision checking reused unchanged by
+the station planner worker, plus the rover scene tools. The previous Station-based
+tools (Station binaries, arm-view, teleop, calibration UI, hand_control) were
+removed after the ROS 2 replacement was validated; they remain in Git history
+(last commit containing them: 934b2b0).

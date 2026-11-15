@@ -1,5 +1,4 @@
 """Real STEP, URDF, Bullet and OMPL acceptance tests, without a Station connection."""
-import asyncio
 import copy
 import json
 import unittest
@@ -10,8 +9,7 @@ from scipy.spatial.transform import Rotation
 from cad import read_solids, sha256
 from planner import Arm, load_config
 from register_scene import register
-from station import execute
-from test_arm import HERE, URDF, calibration, collision_scene, fake_station
+from test_arm import HERE, URDF, calibration, collision_scene
 
 
 class CollisionTests(unittest.TestCase):
@@ -119,17 +117,6 @@ class CollisionTests(unittest.TestCase):
         with collision_scene(self.arm) as world:
             self.arm.c['tcp_xyz_m'] = [0, 0.01, 0]
             with self.assertRaises(ValueError): world.require_hardware_ready()
-
-    def test_executor_refuses_unchecked_or_unverified_scene_without_writes(self):
-        config = calibration()
-        arm = Arm(URDF, config)
-        station = fake_station(config)
-        plan = arm.plan([0]*7, [arm.fk([0]*7)[:3, 3]])
-        with self.assertRaises(ValueError): asyncio.run(execute(station, arm, plan))
-        with collision_scene(arm, {'hardware_verified': False}):
-            plan = arm.plan([0]*7, [arm.fk([0]*7)[:3, 3]])
-            with self.assertRaises(ValueError): asyncio.run(execute(station, arm, plan))
-        self.assertEqual(station.writes, [])
 
 
 class RegistrationTests(unittest.TestCase):

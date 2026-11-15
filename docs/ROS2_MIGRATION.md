@@ -1,9 +1,11 @@
 # Migration ROS 2 du robot postal
 
 Ce document décrit l'architecture livrée, son exploitation (RDK et PC), le
-contrat de sécurité et l'état réel de validation. Les anciens outils (Station,
-`arm-view`, `calibration_ui`, `teleop.py`) sont conservés tant que leur
-suppression n'a pas été décidée.
+contrat de sécurité et l'état réel de validation. Les anciens outils basés sur
+Station (Station, `arm-view`, `teleop`, `calibration_ui`, `hand_control`,
+exécuteur et commissionnement d'`arm_control`) ont été supprimés après
+validation, à la demande de l'utilisateur ; ils restent dans l'historique Git
+(dernier commit les contenant : `934b2b0`).
 
 ## 1. Architecture
 
@@ -217,8 +219,8 @@ le distributeur : activer le couple, saisir une durée (obligatoire), puis « Ru
 cd ros2_robot && PYTHONPATH=postal_robot:postal_robot/tests python3 -m unittest discover -s postal_robot/tests
 # intégration ROS sur bus simulé (domaine isolé) : 10 tests
 ROS_DOMAIN_ID=77 bash ros2_robot/deploy/station_docker.sh python3 /postal/src/postal_robot/tests_ros/test_core_sim.py
-# ancien code arm_control : 51 tests
-cd arm_control && .venv/bin/python -m unittest test_arm test_ui_motion test_fresh_feedback test_commission test_calibration_ui test_collision test_simplify_collision
+# bibliothèques arm_control (planificateur, collisions, CAO) : 21 tests
+cd arm_control && .venv/bin/python -m unittest test_arm test_collision test_simplify_collision test_surface_cad test_rover_registration
 ```
 
 ## 7. Validation matérielle (2026-11-15, opérateur présent)
@@ -275,7 +277,6 @@ famine du moniteur de collision de la station.
   l'écoute en loopback et le jeton de page. Ne pas la publier sur le réseau.
 * Le double de test `sim://` modélise des servos idéaux : il ne remplace pas
   les essais matériels.
-* Anciens outils conservés : `rdk-station.service` (désactivé au boot),
-  `arm-view.py`, `calibration_ui`, `teleop.py`. Les unités systemd se
-  stoppent mutuellement ; un script lancé à la main est refusé par l'ouverture
-  exclusive du port. Leur suppression reste à décider.
+* Anciens outils supprimés : il n'existe plus d'outil de calibration des zéros
+  et des signes du bras. Pour recalibrer, restaurer `arm_control/calibration_ui.py`
+  depuis l'historique (il dépend de Station) ou écrire un outil ROS.
