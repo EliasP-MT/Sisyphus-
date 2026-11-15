@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Postal robot station</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--ink:#1d2330;--muted:#667085;--line:#d9dde5;--ok:#11823b;--warn:#b25e09;--bad:#c4262e;--accent:#2457c5}
+*{box-sizing:border-box}body{margin:0;font:14px/1.4 system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+header{position:sticky;top:0;z-index:2;background:#151b28;color:#fff;padding:10px 16px;display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+header h1{font-size:16px;margin:0 12px 0 0}
+.pill{padding:3px 10px;border-radius:99px;font-weight:600;font-size:12px;background:#3a4256}
+.pill.ok{background:var(--ok)}.pill.warn{background:var(--warn)}.pill.bad{background:var(--bad)}
+main{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:14px;padding:14px}
+section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+section.wide{grid-column:1/-1}h2{font-size:14px;margin:0 0 10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+button{font:inherit;padding:6px 12px;border-radius:6px;border:1px solid var(--line);background:#fff;cursor:pointer}
+button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}button.danger{background:var(--bad);color:#fff;border-color:var(--bad)}
+button:disabled{opacity:.45;cursor:not-allowed}input[type=text],input[type=number]{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:6px;width:9em}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:6px 0}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{padding:3px 6px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child,td.l,th.l{text-align:left}.scroll{overflow-x:auto}
+.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.muted{color:var(--muted)}
+.cams{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:10px}
+.cam{position:relative;background:#000;border-radius:8px;overflow:hidden;aspect-ratio:4/3}.cam img{width:100%;height:100%;object-fit:contain;display:block}
+.cam span{position:absolute;left:8px;top:6px;color:#fff;background:#0009;padding:2px 6px;border-radius:4px;font-size:12px}
+ul.msgs{margin:4px 0;padding-left:18px}#log{font:12px ui-monospace,monospace;max-height:140px;overflow:auto;background:#f7f8fa;border:1px solid var(--line);border-radius:6px;padding:6px;white-space:pre-wrap}
+.pad{display:grid;grid-template-columns:repeat(3,64px);gap:6px}.pad button{height:48px;user-select:none;touch-action:none}
+progress{width:100%}.banner{padding:8px 10px;border-radius:6px;margin:4px 0}.banner.bad{background:#fde8e9;color:var(--bad)}.banner.warn{background:#fff4e5;color:var(--warn)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Postal robot station</h1>
+  <span id="link" class="pill">robot: ?</span>
+  <span id="sup" class="pill">supervisor: ?</span>
+  <span id="lease" class="pill">lease: ?</span>
+  <button id="ack" class="primary">Acknowledge &amp; resume</button>
+  <span id="event" class="muted" style="color:#c9cfdb"></span>
+</header>
+<main>
+<section class="wide" id="alerts"></section>
+
+<section class="wide"><h2>Cameras</h2>
+  <div class="cams">
+    <div class="cam"><img id="cam1" alt="camera 1"><span id="cam1age">camera 1</span></div>
+    <div class="cam"><img id="cam2" alt="camera 2"><span id="cam2age">camera 2</span></div>
+  </div>
+</section>
+
+<section><h2>Arm &amp; predefined poses</h2>
+  <div class="row">Torque: <b id="armTorque">?</b>
+    <button id="armOn">Enable (hold here)</button>
+    <label><input type="checkbox" id="armSupport"> arm supported</label>
+    <button id="armOff" class="danger">Disable</button></div>
+  <div class="scroll"><table id="poses"><thead><tr><th class="l"></th><th class="l">Pose</th><th class="l">Recorded</th><th class="l">Warnings</th></tr></thead><tbody></tbody></table></div>
+  <div class="row"><button id="plan" class="primary">Plan to selected</button>
+    <label><input type="checkbox" id="withGripper"> then gripper</label>
+    <button id="execute" disabled>Execute plan</button><button id="cancel" class="danger">Cancel motion</button></div>
+  <div id="planBox" class="muted">No plan.</div>
+  <progress id="progress" max="1" value="0" hidden></progress>
+  <div class="row"><input type="text" id="poseName" placeholder="new pose name" maxlength="63">
+    <button id="capture">Capture current</button><button id="replace">Replace selected</button><button id="delete">Delete selected</button></div>
+  <div class="row">Gripper ticks <input type="number" id="gripTicks" min="0" max="4095" step="1"> <button id="grip">Move gripper</button>
+    <span class="muted" id="gripNow"></span></div>
+</section>
+
+<section><h2>Base (Kiwi)</h2>
+  <div class="row">Torque: <b id="baseTorque">?</b> <button id="baseOn">Enable</button><button id="baseOff">Disable</button></div>
+  <div class="row">Linear <input type="number" id="lin" value="0.05" min="0" max="0.15" step="0.01"> m/s
+    Angular <input type="number" id="ang" value="0.3" min="0" max="0.6" step="0.05"> rad/s</div>
+  <div class="row"><div class="pad">
+    <button data-m="0,0,1">⟲ Q</button><button data-m="1,0,0">▲ W</button><button data-m="0,0,-1">⟳ E</button>
+    <button data-m="0,1,0">◀ A</button><button data-m="0,0,0" disabled>■</button><button data-m="0,-1,0">▶ D</button>
+    <span></span><button data-m="-1,0,0">▼ S</button><span></span></div>
+    <div class="muted" style="max-width:16em">Hold a button or key (W/A/S/D/Q/E). Release = stop. The robot also stops if commands stop arriving (0.3 s) or the station link is lost.</div></div>
+  <div id="baseInfo" class="muted"></div>
+</section>
+
+<section><h2>Dispenser</h2>
+  <div class="row">Torque: <b id="dispTorque">?</b> <button id="dispOn">Enable</button><button id="dispOff">Disable</button></div>
+  <div class="row">Duration <input type="number" id="dispDur" min="0.1" max="10" step="0.1" placeholder="s (required)">
+    <button id="dispRun" class="primary">Run at −1000</button><button id="dispStop" class="danger">Stop</button></div>
+  <div id="dispInfo" class="muted"></div>
+</section>
+
+<section><h2>Collision checking</h2><div id="collision"></div></section>
+
+<section class="wide"><h2>Motors (raw feedback, single bus owner)</h2>
+  <div class="scroll"><table id="motors"><thead><tr><th class="l">ID</th><th class="l">Role</th><th>Mode</th><th>Ticks</th><th>Angle</th><th>Speed</th><th>Load</th><th>Current</th><th>V</th><th>°C</th><th>Torque</th><th>Status</th><th>Age s</th><th class="l">Fault</th></tr></thead><tbody></tbody></table></div>
+</section>
+
+<section class="wide"><h2>Log</h2><div id="log"></div></section>
+</main>
+<script>
+const TOKEN = '__TOKEN__';
+const $ = id => document.getElementById(id);
+let state = null, poses = [], selected = null, plan = null;
+
+function log(msg, cls) {
+  const line = document.createElement('div');
+  line.textContent = new Date().toLocaleTimeString() + '  ' + msg;
+  if (cls) line.className = cls;
+  $('log').prepend(line);
+}
+async function api(path, body) {
+  try {
+    const r = await fetch(path, {method: 'POST', headers: {'X-Postal-Token': TOKEN, 'Content-Type': 'application/json'},
+                                 body: JSON.stringify(body || {})});
+    return await r.json();
+  } catch (e) { return {success: false, message: 'station web node unreachable: ' + e}; }
+}
+async function act(path, body, label) {
+  const r = await api(path, body);
+  log((label || path) + ': ' + (r.message || r.error || JSON.stringify(r)), r.success === false || r.error ? 'bad' : 'ok');
+  return r;
+}
+setInterval(() => api('/api/ping'), 200);  // station lease exists only while this page is open
+
+for (const i of [1, 2]) $('cam' + i).src = `/camera/${i}.mjpg?token=${encodeURIComponent(TOKEN)}`;
+
+function pill(el, text, cls) { el.textContent = text; el.className = 'pill ' + (cls || ''); }
+function fmt(v, d = 2) { return v === null || v === undefined ? '–' : Number(v).toFixed(d); }
+
+function render() {
+  const s = state, sup = s.supervisor;
+  const age = s.ages_s.supervisor;
+  if (age === undefined) pill($('link'), 'robot: no data', 'bad');
+  else pill($('link'), `robot data ${age < 1 ? 'fresh' : 'STALE'} (${fmt(age, 1)} s)`, age < 1 ? 'ok' : 'bad');
+  pill($('lease'), s.browser_lease ? 'lease: sending' : 'lease: off', s.browser_lease ? 'ok' : 'bad');
+  if (sup && age < 2) {
+    const cls = {ACTIVE: 'ok', AWAITING_ACK: 'warn', WAITING_FOR_STATION: 'warn', LINK_LOST: 'bad', FAULT: 'bad'}[sup.state_name];
+    pill($('sup'), sup.state_name + (sup.session_id && sup.session_id !== s.session ? ' (other session)' : ''), cls);
+    $('event').textContent = sup.last_event;
+    $('ack').disabled = sup.state_name === 'ACTIVE';
+    let html = '';
+    for (const f of sup.faults) html += `<div class="banner bad">Fault: ${esc(f)}</div>`;
+    for (const w of sup.warnings) html += `<div class="banner warn">${esc(w)}</div>`;
+    $('alerts').innerHTML = html || '<span class="ok">No fault or warning.</span>';
+    $('armTorque').textContent = sup.arm_torque ? 'on' : 'off';
+    $('baseTorque').textContent = sup.base_enabled ? 'on' : 'off';
+    $('dispTorque').textContent = sup.dispenser_enabled ? 'on' : 'off';
+    $('dispInfo').textContent = sup.dispenser_running ? `running, ${fmt(sup.dispenser_remaining_s, 1)} s left` : 'stopped';
+    $('baseInfo').textContent = sup.base_moving ? 'wheels commanded' : 'wheels at zero';
+  } else {
+    pill($('sup'), 'supervisor: unknown', 'bad');
+    $('alerts').innerHTML = '<div class="banner bad">No fresh supervisor state from the robot: check Wi-Fi, ROS_DOMAIN_ID and the robot service.</div>';
+  }
+  for (const i of [1, 2]) {
+    const c = s.cameras[i];
+    $('cam' + i + 'age').textContent = `camera ${i}: ` + (c.age_s === null ? 'no frame' : (c.age_s < 2 ? `live (${fmt(c.age_s, 1)} s)` : `STALE ${fmt(c.age_s, 0)} s`));
+  }
+  const rows = s.motors.map(m => {
+    const angle = s.joints['rev_motor_0' + m.motor_id];
+    const cls = m.fault ? (m.torque_enabled || m.role === 'arm' ? 'bad' : 'warn') : '';
+    return `<tr class="${cls}"><td>${m.motor_id}</td><td class="l">${m.role}</td><td>${m.mode === 255 ? '?' : m.mode}</td>` +
+      `<td>${m.ever_received ? m.position_ticks : '–'}</td><td>${angle === undefined ? '–' : fmt(angle * 180 / Math.PI, 1) + '°'}</td>` +
+      `<td>${m.speed_ticks_s}</td><td>${m.load_raw}</td><td>${m.current_raw}</td><td>${fmt(m.voltage_v, 1)}</td><td>${m.temperature_c}</td>` +
+      `<td>${m.torque_enabled ? 'on' : 'off'}</td><td>0x${m.servo_status.toString(16).padStart(2, '0')}</td>` +
+      `<td class="${m.fresh ? '' : 'bad'}">${m.age_s < 0 ? 'never' : fmt(m.age_s, 2)}</td><td class="l">${esc(m.fault)}</td></tr>`;
+  });
+  $('motors').tBodies[0].innerHTML = rows.join('');
+  const g = s.motors.find(m => m.role === 'gripper');
+  $('gripNow').textContent = g && g.ever_received ? `now ${g.position_ticks}` : '';
+  const p = s.planner || {};
+  $('collision').innerHTML = (p.hardware_ready
+      ? `<div class="ok"><b>Collision geometry validated for execution.</b></div>`
+      : `<div class="bad"><b>Execution blocked:</b> ${esc(p.reason || 'unknown')}</div>`) +
+    (p.scene ? `<div class="muted">${esc(p.reason)}<br>Scene ${esc(p.scene.split('/').pop())} · sha ${p.scene_sha256.slice(0, 12)}<br>` +
+      `margin ${p.margin_m * 1000} mm · self ${p.self_margin_m * 1000} mm · edge step ${p.edge_step_rad} rad · ` +
+      `modelled gripper ${p.gripper_angle_rad} rad · registration: ${esc(p.registration)}<br>` +
+      `calibration sha ${p.calibration_sha256.slice(0, 12)} · max ${fmt(p.max_velocity_rad_s, 3)} rad/s</div>` : '');
+  const st = s.arm_status || {};
+  const go = s.go;
+  $('progress').hidden = !(go && go.active);
+  if (go && go.feedback) $('progress').value = go.feedback.progress;
+  if (st.message) $('planBox').dataset.status = st.stage + ': ' + st.message;
+  renderPlan();
+}
+function renderPlan() {
+  const st = $('planBox').dataset.status || '';
+  if (!plan) { $('planBox').innerHTML = esc(st || 'No plan.'); $('execute').disabled = true; return; }
+  const reasons = plan.reasons.length ? '<ul class="msgs bad">' + plan.reasons.map(r => `<li>${esc(r)}</li>`).join('') + '</ul>' : '';
+  $('planBox').innerHTML = `<b class="${plan.executable ? 'ok' : 'bad'}">${plan.executable ? 'Executable' : 'Not executable'}</b> — ` +
+    `${esc(plan.pose)}: ${esc(plan.message)}${reasons}<div class="muted">${esc(st)}</div><div class="muted">Preview: RViz "Planned motion" (frame prefix preview/).</div>`;
+  $('execute').disabled = !plan.executable || plan.used;
+}
+function esc(t) { return String(t ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c])); }
+
+async function refresh() {
+  const r = await api('/api/state');
+  if (r && r.session) { state = r; render(); }
+  else pill($('link'), 'station node unreachable', 'bad');
+}
+setInterval(refresh, 300);
+
+async function loadPoses() {
+  const r = await api('/api/poses');
+  if (!r.success) { log('poses: ' + r.message, 'bad'); return; }
+  poses = r.poses;
+  $('poses').tBodies[0].innerHTML = poses.map(p => `<tr><td><input type="radio" name="pose" value="${esc(p.name)}" ${p.name === selected ? 'checked' : ''}></td>` +
+    `<td class="l">${esc(p.name)}</td><td class="l muted">${esc(p.recorded_at.slice(0, 19))}</td>` +
+    `<td class="l ${p.warnings.length ? 'warn' : 'ok'}">${p.warnings.length ? esc(p.warnings.join('; ')) : 'within margins'}</td></tr>`).join('');
+  for (const r of document.querySelectorAll('input[name=pose]')) r.onchange = () => { selected = r.value; plan = null; renderPlan(); };
+}
+
+$('ack').onclick = () => act('/api/ack', {}, 'acknowledge');
+$('armOn').onclick = () => act('/api/torque', {group: 'arm', enable: true}, 'arm torque on');
+$('armOff').onclick = () => {
+  if (!$('armSupport').checked) { log('Support the arm and tick "arm supported" before removing torque', 'bad'); return; }
+  act('/api/torque', {group: 'arm', enable: false, confirm: true}, 'arm torque off');
+};
+$('baseOn').onclick = () => act('/api/torque', {group: 'base', enable: true}, 'base torque on');
+$('baseOff').onclick = () => act('/api/torque', {group: 'base', enable: false}, 'base torque off');
+$('dispOn').onclick = () => act('/api/torque', {group: 'dispenser', enable: true}, 'dispenser torque on');
+$('dispOff').onclick = () => act('/api/torque', {group: 'dispenser', enable: false}, 'dispenser torque off');
+$('dispRun').onclick = () => {
+  const d = parseFloat($('dispDur').value);
+  if (!(d > 0 && d <= 10)) { log('Dispenser duration is required (0–10 s)', 'bad'); return; }
+  act('/api/dispenser/run', {duration_s: d}, 'dispenser');
+};
+$('dispStop').onclick = () => act('/api/dispenser/stop', {}, 'dispenser stop');
+$('grip').onclick = () => act('/api/gripper', {ticks: parseInt($('gripTicks').value)}, 'gripper');
+$('capture').onclick = async () => {
+  const name = $('poseName').value.trim();
+  if (!name) { log('Enter a pose name', 'bad'); return; }
+  log('Capturing: hold the arm still…');
+  const r = await act('/api/pose/capture', {name}, 'capture');
+  if (r.success) { $('poseName').value = ''; selected = name; loadPoses(); }
+};
+$('replace').onclick = async () => {
+  if (!selected || !confirm(`Replace "${selected}" with the current measured arm position? A backup of the pose file is kept.`)) return;
+  if ((await act('/api/pose/capture', {name: selected, replace: true}, 'replace')).success) loadPoses();
+};
+$('delete').onclick = async () => {
+  if (!selected || !confirm(`Delete pose "${selected}"? A backup of the pose file is kept.`)) return;
+  if ((await act('/api/pose/delete', {name: selected}, 'delete')).success) { selected = null; loadPoses(); }
+};
+$('plan').onclick = async () => {
+  if (!selected) { log('Select a pose', 'bad'); return; }
+  plan = null; $('planBox').dataset.status = 'planning…'; renderPlan(); $('plan').disabled = true;
+  const r = await act('/api/plan', {pose: selected}, 'plan ' + selected);
+  $('plan').disabled = false;
+  if (r.success) { plan = {...r, pose: selected, used: false}; renderPlan(); }
+};
+$('execute').onclick = async () => {
+  if (!plan) return;
+  plan.used = true; renderPlan();
+  await act('/api/execute', {plan_id: plan.plan_id, include_gripper: $('withGripper').checked}, 'execute');
+};
+$('cancel').onclick = () => act('/api/cancel', {}, 'cancel');
+
+// Base deadman: send while held, stop on release / blur.
+let held = null, timer = null;
+function drive(m) {
+  held = m;
+  const send = () => { if (!held) return; const l = +$('lin').value, a = +$('ang').value;
+    api('/api/base', {vx: held[0] * l, vy: held[1] * l, wz: held[2] * a}); };
+  send(); clearInterval(timer); timer = setInterval(send, 100);
+}
+function release() { if (!held) return; held = null; clearInterval(timer); api('/api/base/stop'); }
+for (const b of document.querySelectorAll('.pad button[data-m]')) {
+  const m = b.dataset.m.split(',').map(Number);
+  b.onpointerdown = e => { e.preventDefault(); b.setPointerCapture(e.pointerId); drive(m); };
+  b.onpointerup = b.onpointercancel = release;
+}
+const keys = {w: [1, 0, 0], s: [-1, 0, 0], a: [0, 1, 0], d: [0, -1, 0], q: [0, 0, 1], e: [0, 0, -1]};
+addEventListener('keydown', e => { if (e.target.tagName === 'INPUT' || e.repeat || !keys[e.key]) return; drive(keys[e.key]); });
+addEventListener('keyup', e => { if (keys[e.key]) release(); });
+addEventListener('blur', release);
+document.addEventListener('visibilitychange', () => { if (document.hidden) release(); });
+loadPoses();
+</script>
+</body>
+</html>
