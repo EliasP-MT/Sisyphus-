@@ -5,6 +5,9 @@ trajectory_msgs/JointTrajectory trajectory   # rev_motor_01..07, radians
 string plan_id
 bool collision_checked                        # must be true
 string collision_scene_sha256                 # must be non-empty
+# Per-joint bound (rad) of the static-error compensation at the final pose,
+# validated collision-free by the planner; empty or 0 = no compensation.
+float64[] compensation_limit_rad
 ---
 int8 SUCCEEDED=0
 int8 REJECTED=1

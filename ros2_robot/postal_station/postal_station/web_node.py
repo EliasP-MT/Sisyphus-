@@ -136,8 +136,8 @@ class Station(Node):
             self.planner_status = {'hardware_ready': False, 'reason': f'planner worker unreachable: {exc}'}
 
     # ------------------------------------------------------------------ API
-    def call(self, name, timeout=20., **fields):
-        client = self.srv[name]
+    def call(self, service, timeout=20., **fields):
+        client = self.srv[service]
         if not client.wait_for_service(timeout_sec=2.):
             raise RuntimeError(f'{client.srv_name} unavailable (robot or station node not reachable)')
         future = client.call_async(client.srv_type.Request(**fields))
@@ -187,8 +187,8 @@ class Station(Node):
             '/api/pose/delete': ('delete', lambda: dict(name=str(body['name']))),
         }
         if path in simple:
-            name, fields = simple[path]
-            r = self.call(name, **fields())
+            service, fields = simple[path]
+            r = self.call(service, **fields())
             return {'success': r.success, 'message': r.message}
         if path == '/api/poses':
             r = self.call('list')

@@ -87,3 +87,45 @@ class TrajectoryTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class CompensationTests(unittest.TestCase):
+    """Proportional servo with a constant gravity sag on J4 (index 3)."""
+
+    def simulate(self, limits, sag=.03):
+        c = calibration()
+        times, points = plan(c)
+        r = TrajectoryRun(c, JOINTS, times, points, compensation=limits)
+        r.begin(points[0], 0.)
+        goal = [c.to_radians(n, t) for n, t in zip(JOINTS, r.goals[0])]
+        t = 0.
+        while r.state == RUNNING and t < 20:
+            measured = list(goal)
+            measured[3] -= sag
+            out = r.step(t, measured)
+            if out:
+                goal = [c.to_radians(n, v) for n, v in zip(JOINTS, out)]
+            t += .05
+        return r, goal, points[-1]
+
+    def test_compensation_reaches_planned_pose(self):
+        r, goal, final = self.simulate([0, .06, .06, .06, 0, 0, 0])
+        self.assertEqual(r.state, SUCCEEDED, r.message)
+        self.assertIn('compensation', r.message)
+        self.assertAlmostEqual(goal[3] - final[3], .03, delta=.003)  # commanded goal offset, bounded
+
+    def test_without_compensation_reports_failure(self):
+        r, _, _ = self.simulate(None)
+        self.assertEqual(r.state, ABORTED)
+        self.assertIn('not reached', r.message)
+
+    def test_sag_beyond_bound_is_refused(self):
+        r, goal, final = self.simulate([0, .02, .02, .02, 0, 0, 0])
+        self.assertEqual(r.state, ABORTED)
+        self.assertLessEqual(abs(goal[3] - final[3]), .02 + 1e-3)
+
+    def test_invalid_limits(self):
+        c = calibration()
+        times, points = plan(c)
+        with self.assertRaises(TrajectoryError):
+            TrajectoryRun(c, JOINTS, times, points, compensation=[.5] * 7)

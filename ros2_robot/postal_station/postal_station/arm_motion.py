@@ -145,6 +145,7 @@ class ArmMotion(Node):
             record = dict(id=plan_id, created=time.monotonic(), start=start, pose=request.pose_name,
                           gripper=list(pose.ticks)[7], traj=traj, executable=not reasons, used=False,
                           sha=result['collision_scene_sha256'], times=result['times'],
+                          compensation=[float(c) for c in result['compensation_limit_rad']],
                           positions=result['positions'])
             with self.lock:
                 self.plans = {k: v for k, v in self.plans.items() if time.monotonic() - v['created'] < self.ttl}
@@ -154,7 +155,8 @@ class ArmMotion(Node):
             response.reasons, response.duration_s = reasons, result['duration_s']
             response.collision_scene_sha256, response.trajectory = result['collision_scene_sha256'], traj
             response.message = (f'Collision-free plan, {result["duration_s"]:.1f} s, '
-                                f'{len(result["times"])} checked samples, planned in {result["planning_s"]:.1f} s')
+                                f'{len(result["times"])} checked samples, planned in {result["planning_s"]:.1f} s; '
+                                f'{result["compensation_note"]}')
             self.set_status('planned', response.message + ('' if not reasons else '; NOT executable: ' + '; '.join(reasons)))
         except Exception as exc:
             response.message = str(exc)
@@ -202,7 +204,8 @@ class ArmMotion(Node):
             raise RuntimeError('Robot trajectory action unavailable')
         self.set_status('executing', f'Executing plan to "{plan["pose"]}"')
         goal = ExecuteTrajectory.Goal(trajectory=plan['traj'], plan_id=plan['id'], collision_checked=True,
-                                      collision_scene_sha256=plan['sha'])
+                                      collision_scene_sha256=plan['sha'],
+                                      compensation_limit_rad=plan['compensation'])
         feedback = GoToPose.Feedback()
 
         def relay(fb):
@@ -214,6 +217,13 @@ class ArmMotion(Node):
         robot_goal = sent.result()
         if not robot_goal.accepted:
             raise RuntimeError('Robot rejected the trajectory (supervisor not active or arm busy)')
+        try:
+            return self._follow(handle, plan, robot_goal)
+        except BaseException:
+            robot_goal.cancel_goal_async()  # never leave the robot running a goal we no longer track
+            raise
+
+    def _follow(self, handle, plan, robot_goal):
         outcome = robot_goal.get_result_async()
         last_check = 0.
         while not outcome.done():
@@ -225,7 +235,7 @@ class ArmMotion(Node):
                 try:
                     ticks = self.measured_ticks()
                     check = self.request('/check', {'ticks': ticks[:7]}, timeout=2.)
-                except RuntimeError as exc:  # monitor unavailable: the robot keeps its own guards
+                except Exception as exc:  # monitor unavailable: the robot keeps its own guards
                     self.get_logger().warn(f'Execution monitor: {exc}', throttle_duration_sec=2)
                     check = {'valid': True}
                 if not check['valid']:

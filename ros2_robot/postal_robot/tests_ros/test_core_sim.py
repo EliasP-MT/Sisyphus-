@@ -273,6 +273,19 @@ class CoreSimTest(unittest.TestCase):
         self.assertTrue(wait(lambda: self.h.state.state_name == 'AWAITING_ACK', 2))
         self.assertTrue(self.h.call('supervisor/acknowledge', session_id='session-B').success)
 
+    def test_91_link_loss_never_energizes_free_servos(self):
+        self.activate()
+        self.assertTrue(self.h.call('set_torque', group='base', enable=False).success)
+        self.assertTrue(self.h.call('set_torque', group='dispenser', enable=False).success)
+        self.assertTrue(wait(lambda: not any(self.h.motors[i].torque_enabled for i in (9, 10, 11, 12))))
+        self.assertTrue(self.h.call('dispenser/stop').success)
+        held = [self.h.motors[i].position_ticks for i in range(1, 8)]
+        self.h.beating = False
+        self.assertTrue(wait(lambda: self.h.state.state_name == 'LINK_LOST', 3))
+        time.sleep(.5)
+        self.assertFalse(any(self.h.motors[i].torque_enabled for i in (9, 10, 11, 12)))
+        self.assertEqual(held, [self.h.motors[i].position_ticks for i in range(1, 8)])
+
     def test_9_gripper_range(self):
         self.activate()
         self.assertFalse(self.h.call('gripper/set', ticks=100).success)

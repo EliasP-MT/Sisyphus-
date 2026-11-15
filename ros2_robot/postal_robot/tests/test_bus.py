@@ -100,6 +100,16 @@ class BusTests(unittest.TestCase):
         self.assertEqual(bus.write(9, st3215.GOAL_SPEED, st3215.encode_speed(-1000)), 0)
         self.assertEqual(serial.written[0], packet(9, st3215.INST_WRITE, [0x2E, 0xE8, 0x83]))
 
+    def test_write_timeout_is_a_transaction_error(self):
+        class SerialTimeoutException(OSError):
+            pass
+
+        serial = FakeSerial()
+        serial.write = lambda data: (_ for _ in ()).throw(SerialTimeoutException('Write timeout'))
+        bus = Bus('fake', [9], transport=serial)
+        with self.assertRaises(BusError):
+            bus.read(9, 0x38, 2)
+
     def test_write_without_reply_level(self):
         serial = FakeSerial()
         bus = Bus('fake', [9], transport=serial)

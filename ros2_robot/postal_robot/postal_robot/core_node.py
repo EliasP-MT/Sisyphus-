@@ -93,7 +93,8 @@ class Core(Node):
         p('gripper_speed_ticks_s', 200)
         p('start_tolerance_rad', .02)
         p('arrival_tolerance_rad', .01)
-        p('arrival_timeout_s', 5.)
+        p('arrival_timeout_s', 8.)
+        p('max_compensation_rad', .06)
         p('stationary_speed_ticks_s', 10)
         p('publish_odom_tf', False)
         g = lambda name: self.get_parameter(name).value
@@ -126,7 +127,7 @@ class Core(Node):
                                       'dispenser_default_speed', 'dispenser_max_duration_s',
                                       'gripper_min_ticks', 'gripper_max_ticks', 'gripper_speed_ticks_s',
                                       'start_tolerance_rad', 'arrival_tolerance_rad', 'arrival_timeout_s',
-                                      'stationary_speed_ticks_s', 'publish_odom_tf')}
+                                      'stationary_speed_ticks_s', 'publish_odom_tf', 'max_compensation_rad')}
         if not 0 < abs(self.cfg['dispenser_default_speed']) <= 1000:
             raise ValueError('Dispenser default speed must be within -1000..1000 and non-zero')
         if not 0 < self.cfg['dispenser_max_duration_s'] <= 60:
@@ -342,30 +343,43 @@ class Core(Node):
     def _safe_stop(self, reason):
         self.get_logger().warn(f'Safe stop: {reason}')
         self.cmd_time = None
-        errors = []
-        try:
-            self._set_wheels([0, 0, 0], force=True)
-        except BusError as exc:
-            errors.append(f'wheel stop failed: {exc}')
-        if self.dispenser_deadline is not None or self._torque('dispenser'):
-            try:
-                self._write(self.dispenser_id, st3215.GOAL_SPEED, 0)
-            except BusError as exc:
-                errors.append(f'dispenser stop failed: {exc}')
-            self.dispenser_deadline = None
+        errors = self._stop_wheel_mode(self.wheel_ids + [self.dispenser_id])
+        self.wheel_target, self.dispenser_deadline = [0, 0, 0], None
         if self.run is not None and self.run.state == RUNNING:
+            # Only an interrupted trajectory needs a new goal; an idle arm already
+            # holds its last goal (rewriting it would accumulate gravity sag).
             self.run._abort(f'Stopped: {reason}')
-        errors += self._hold_arm()
-        if self.run is not None:
+            errors += self._hold_arm()
             self.run.held = True
         for e in errors:
             self.supervisor.fault(e)
 
-    def _hold_arm(self):
+    def _stop_wheel_mode(self, ids):
+        """Zero speed for wheel-mode servos that are energized or of unknown state.
+
+        Writing a goal register turns ST3215 torque on, so servos whose fresh
+        feedback says torque is off are left free (they cannot be driving)."""
         errors = []
-        for i in ARM_IDS:
+        for i in ids:
             m = self.motors[i]
-            if not (m.data and m.data['torque_enabled']):
+            if self._fresh(m) and not m.data['torque_enabled']:
+                continue
+            try:
+                self._write(i, st3215.GOAL_SPEED, 0)
+            except BusError as exc:
+                errors.append(f'ID {i}: stop failed: {exc}')
+        return errors
+
+    def _hold_arm(self):
+        """Stop sending arm goals; the last goal is a validated path sample at most
+        one control period (and the tracking bound) ahead, as in the legacy
+        executor. Rewriting goal = measured position would add gravity sag at
+        every stop, so only a moving gripper is stopped where it is."""
+        errors = []
+        for i in [self.gripper_id]:
+            m = self.motors[i]
+            if not (m.data and m.data['torque_enabled']) or (
+                    self._fresh(m) and abs(m.data['speed']) <= self.cfg['stationary_speed_ticks_s']):
                 continue
             if not self._fresh(m):
                 errors.append(f'ID {i}: cannot hold at measured position (stale); last goal kept')
@@ -381,8 +395,8 @@ class Core(Node):
         now = time.monotonic()
         if not force and raw == self.wheel_target and now - self.wheel_written < .5:
             return
-        if not force and raw == [0, 0, 0] and self.wheel_target == [0, 0, 0] and not self._torque('base'):
-            return
+        if raw == [0, 0, 0] and self.wheel_target == [0, 0, 0] and not self._torque('base'):
+            return  # never energize free wheels just to write a zero speed
         if raw == [0, 0, 0] and self.wheel_target != [0, 0, 0]:
             self.wheel_zero_since = now
         failed = []
@@ -615,11 +629,13 @@ class Core(Node):
                     raise RuntimeError('Support the arm and confirm: it can fall when torque is removed')
                 if request.enable:
                     c = self.calibration.data
-                    for i in ARM_IDS:  # hold where it is, then energize
+                    for i in ARM_IDS:
+                        # Goal = measured position FIRST: any goal write energizes an
+                        # ST3215, so it must never meet a stale goal register.
+                        self._write(i, st3215.GOAL_POSITION, self.motors[i].data['position'])
                         speed = self.cfg['gripper_speed_ticks_s'] if i == self.gripper_id else c['servo_speed_ticks_s']
                         self._write(i, st3215.GOAL_SPEED, speed)
                         self._write(i, st3215.ACCELERATION, c['servo_acceleration'])
-                        self._write(i, st3215.GOAL_POSITION, self.motors[i].data['position'])
                 for i in ARM_IDS:
                     self._write(i, st3215.TORQUE_ENABLE, int(request.enable))
             else:
@@ -657,7 +673,9 @@ class Core(Node):
     def on_dispense_stop(self, request, response):
         def act():
             self.dispenser_deadline = None
-            self._write(self.dispenser_id, st3215.GOAL_SPEED, 0)
+            errors = self._stop_wheel_mode([self.dispenser_id])
+            if errors:
+                raise BusError('; '.join(errors))
             return 'Dispenser stopped'
         return self._respond(response, act)
 
@@ -764,7 +782,9 @@ class Core(Node):
                                 start_tolerance=self.cfg['start_tolerance_rad'],
                                 arrival_tolerance=self.cfg['arrival_tolerance_rad'],
                                 arrival_timeout=self.cfg['arrival_timeout_s'],
-                                max_step_gap=max(.25, 4 * self.period))
+                                max_step_gap=max(.25, 4 * self.period),
+                                compensation=[min(c, self.cfg['max_compensation_rad'])
+                                              for c in goal.compensation_limit_rad] or None)
 
             def start():
                 self._require_active()
@@ -824,12 +844,7 @@ class Core(Node):
         self.thread.join(timeout=2)
         if self.bus is not None:
             with self.lock:
-                try:
-                    self._set_wheels([0, 0, 0], force=True)
-                    if self.dispenser_deadline is not None:
-                        self._write(self.dispenser_id, st3215.GOAL_SPEED, 0)
-                except BusError:
-                    pass
+                self._stop_wheel_mode(self.wheel_ids + [self.dispenser_id])
             self.bus.close()
 
 
