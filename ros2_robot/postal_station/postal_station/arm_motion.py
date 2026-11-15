@@ -92,6 +92,9 @@ class ArmMotion(Node):
             raise RuntimeError(json.load(exc).get('error', str(exc))) from exc
         except urllib.error.URLError as exc:
             raise RuntimeError(f'Planner worker unreachable at {self.url}: {exc.reason}') from exc
+        except TimeoutError as exc:
+            raise RuntimeError(f'Planner worker did not answer within {timeout:.0f} s (busy or stuck; '
+                               'restart the station)') from exc
 
     def call(self, client, request, timeout=10.):
         if not client.wait_for_service(timeout_sec=3.):
@@ -134,8 +137,10 @@ class ArmMotion(Node):
                 raise RuntimeError(f'Unknown pose "{request.pose_name}"')
             start = self.measured_ticks()
             speed = request.speed_factor or 1.
+            began = time.monotonic()
             result = self.request('/plan', {'start_ticks': start[:7], 'goal_ticks': list(pose.ticks)[:7],
-                                            'speed_factor': speed})
+                                            'speed_factor': speed}, timeout=75.)
+            self.get_logger().info(f'Plan to {request.pose_name} at {speed:g}x in {time.monotonic() - began:.1f} s')
             reasons = list(result['reasons'])
             if pose.warnings:
                 reasons += [f'pose warning: {w}' for w in pose.warnings]
