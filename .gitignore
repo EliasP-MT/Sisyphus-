@@ -7,3 +7,6 @@ __pycache__/
 /calibration-images/
 /models/
 /config/
+/hand_control/.venv/
+/hand_control/.sdk/
+/hand_control/.pip.pyz

@@ -1,0 +1,27 @@
+{
+  "frame": "base_link",
+  "tip_link": "Gripper_Base_v1_1",
+  "tcp_xyz_m": [0, 0, 0],
+  "hardware_verified": false,
+  "bus": "REPLACE_WITH_ARM_BUS_SERIAL",
+  "joints": [
+    {"name": "rev_motor_01", "motor_id": 1, "zero_ticks": null, "sign": null, "min_ticks": null, "max_ticks": null},
+    {"name": "rev_motor_02", "motor_id": 2, "zero_ticks": null, "sign": null, "min_ticks": null, "max_ticks": null},
+    {"name": "rev_motor_03", "motor_id": 3, "zero_ticks": null, "sign": null, "min_ticks": null, "max_ticks": null},
+    {"name": "rev_motor_04", "motor_id": 4, "zero_ticks": null, "sign": null, "min_ticks": null, "max_ticks": null},
+    {"name": "rev_motor_05", "motor_id": 5, "zero_ticks": null, "sign": null, "min_ticks": null, "max_ticks": null},
+    {"name": "rev_motor_06", "motor_id": 6, "zero_ticks": null, "sign": null, "min_ticks": null, "max_ticks": null},
+    {"name": "rev_motor_07", "motor_id": 7, "zero_ticks": null, "sign": null, "min_ticks": null, "max_ticks": null}
+  ],
+  "dt_s": 0.02,
+  "max_velocity_rad_s": 0.15,
+  "max_acceleration_rad_s2": 0.3,
+  "max_jerk_rad_s3": 1.0,
+  "position_tolerance_m": 0.002,
+  "orientation_tolerance_rad": 0.03,
+  "cartesian_step_m": 0.005,
+  "max_ik_step_rad": 0.35,
+  "tracking_error_rad": 0.10,
+  "servo_speed_ticks_s": 100,
+  "servo_acceleration": 10
+}
