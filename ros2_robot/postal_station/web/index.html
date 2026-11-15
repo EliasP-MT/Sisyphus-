@@ -105,15 +105,18 @@ function log(msg, cls) {
   if (cls) line.className = cls;
   $('log').prepend(line);
 }
-async function api(path, body) {
+async function api(path, body, timeoutMs = 20000) {
+  const abort = new AbortController(), timer = setTimeout(() => abort.abort(), timeoutMs);
   try {
     const r = await fetch(path, {method: 'POST', headers: {'X-Postal-Token': TOKEN, 'Content-Type': 'application/json'},
-                                 body: JSON.stringify(body || {})});
+                                 body: JSON.stringify(body || {}), signal: abort.signal});
     return await r.json();
-  } catch (e) { return {success: false, message: 'station web node unreachable: ' + e}; }
+  } catch (e) {
+    return {success: false, message: e.name === 'AbortError' ? `no answer from the station within ${timeoutMs / 1000} s` : 'station web node unreachable: ' + e};
+  } finally { clearTimeout(timer); }
 }
-async function act(path, body, label) {
-  const r = await api(path, body);
+async function act(path, body, label, timeoutMs) {
+  const r = await api(path, body, timeoutMs);
   log((label || path) + ': ' + (r.message || r.error || JSON.stringify(r)), r.success === false || r.error ? 'bad' : 'ok');
   return r;
 }
@@ -243,7 +246,11 @@ $('plan').onclick = async () => {
   plan = null; $('planBox').dataset.status = 'planning…'; renderPlan(); $('plan').disabled = true;
   const speed = parseFloat($('speed').value);
   if (!(speed >= 0.1 && speed <= 2)) { log('Speed must be between 0.1 and 2', 'bad'); $('plan').disabled = false; return; }
-  const r = await act('/api/plan', {pose: selected, speed_factor: speed}, `plan ${selected} at ${speed}x`);
+  const began = Date.now(), tick = setInterval(() => {
+    $('planBox').dataset.status = `planning… ${Math.round((Date.now() - began) / 1000)} s`; renderPlan(); }, 1000);
+  const r = await act('/api/plan', {pose: selected, speed_factor: speed}, `plan ${selected} at ${speed}x`, 110000);
+  clearInterval(tick);
+  if (!r.success) { $('planBox').dataset.status = 'planning failed: ' + r.message; renderPlan(); }
   $('plan').disabled = false;
   if (r.success) { plan = {...r, pose: selected, used: false}; renderPlan(); }
 };
