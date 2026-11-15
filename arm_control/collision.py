@@ -3,10 +3,7 @@ import hashlib
 import json
 import math
 import struct
-<<<<<<< HEAD
 import tempfile
-=======
->>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
 import xml.etree.ElementTree as ET
 import zlib
 from pathlib import Path
@@ -33,10 +30,7 @@ class CollisionWorld:
         self.scene_path = Path(scene_path).resolve()
         self.files = {self.scene_path: sha256(self.scene_path), self.urdf: sha256(self.urdf)}
         self.checks = 0
-<<<<<<< HEAD
         self.refinement_robot = None
-=======
->>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
         try:
             self.scene = json.loads(self.scene_path.read_text())
             s = self.scene
@@ -48,7 +42,6 @@ class CollisionWorld:
                     raise ValueError(f'{key}: valeur hors [{low}, {high}]')
             if not 0 <= s['gripper_angle_rad'] <= 2.2028:
                 raise ValueError('Ouverture modélisée de pince invalide')
-<<<<<<< HEAD
             collision_urdf = self.urdf
             self.proxy_directory = None
             if s.get('arm_collision_proxy') in ('link_boxes', 'convex_hulls'):
@@ -69,11 +62,6 @@ class CollisionWorld:
                     flags=p.URDF_USE_SELF_COLLISION | p.URDF_MAINTAIN_LINK_ORDER,physicsClientId=self.client)
                 for i in range(-1,p.getNumJoints(self.refinement_robot,physicsClientId=self.client)):
                     p.changeVisualShape(self.refinement_robot,i,rgbaColor=[0,0,0,0],physicsClientId=self.client)
-=======
-            self.robot = p.loadURDF(str(self.urdf), useFixedBase=True,
-                flags=p.URDF_USE_SELF_COLLISION | p.URDF_MAINTAIN_LINK_ORDER,
-                physicsClientId=self.client)
->>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
             self.links, self.joints, self.parents, self.groups = {'base_link': -1}, {}, {}, {-1: -1}
             for i in range(p.getNumJoints(self.robot, physicsClientId=self.client)):
                 info = p.getJointInfo(self.robot, i, physicsClientId=self.client)
@@ -109,13 +97,10 @@ class CollisionWorld:
                 and frozenset((a, b)) not in self.allowed], dtype=int).reshape(-1, 2)
             self.centres = {}
             for i in self.links.values():
-<<<<<<< HEAD
                 shapes = p.getCollisionShapeData(self.robot, i, physicsClientId=self.client)
                 if shapes and shapes[0][2] != p.GEOM_MESH:
                     self.centres[i] = np.asarray(shapes[0][5])
                     continue
-=======
->>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
                 vertices = p.getMeshData(self.robot, i, flags=p.MESH_DATA_SIMULATION_MESH,
                                          physicsClientId=self.client)[1]
                 if vertices:
@@ -124,7 +109,6 @@ class CollisionWorld:
             self._set_joints(np.zeros(7))
             if s.get('cad') is not None:
                 self._load_cad(s['cad'])
-<<<<<<< HEAD
             self._load_surfaces(s.get('surface_meshes', []))
             for index, box in enumerate(s.get('proxy_boxes', [])):
                 body = self._box(box)['body']
@@ -132,8 +116,6 @@ class CollisionWorld:
                     ignored=set(),local=transform(box['xyz_m'],box['rpy_rad']),
                     bounds=np.array([-np.array(box['size_m'])/2,np.array(box['size_m'])/2]),
                     classifier=None,centre=[0,0,0]))
-=======
->>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
             ids = {b['id'] for b in self.cad_bodies}
             self.allowed_cad = set()
             for pair in s.get('allowed_cad_pairs', []):
@@ -159,7 +141,6 @@ class CollisionWorld:
         if self.client is not None:
             p.disconnect(physicsClientId=self.client)
             self.client = None
-<<<<<<< HEAD
         if getattr(self, 'proxy_directory', None):
             self.proxy_directory.cleanup()
             self.proxy_directory = None
@@ -186,8 +167,6 @@ class CollisionWorld:
             self._set_body(body,pose)
             self.cad_bodies.append(dict(body=body,id=100000+index,name=entry['name'],parent=-1,
                 ignored=set(),local=pose,bounds=np.array(report['bounds_m']),classifier=None,centre=np.mean(report['bounds_m'],axis=0)))
-=======
->>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
 
     def _pose(self, index):
         if index == -1:
@@ -205,21 +184,15 @@ class CollisionWorld:
     def _set_joints(self, q):
         for name, value in zip(JOINTS, q):
             p.resetJointState(self.robot, self.joints[name], float(value), physicsClientId=self.client)
-<<<<<<< HEAD
             if self.refinement_robot is not None:
                 p.resetJointState(self.refinement_robot,self.joints[name],float(value),physicsClientId=self.client)
-=======
->>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
         angle = self.scene['gripper_angle_rad']
         for name, value in [('rev_motor_08', angle), ('rev_motor_08_1', -0.0115*angle),
                             ('rev_motor_08_2', 0.0115*angle)]:
             if name in self.joints:
                 p.resetJointState(self.robot, self.joints[name], value, physicsClientId=self.client)
-<<<<<<< HEAD
                 if self.refinement_robot is not None:
                     p.resetJointState(self.refinement_robot,self.joints[name],value,physicsClientId=self.client)
-=======
->>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
 
     def _box(self, box):
         size = vector(box['size_m'], 3, 'dimensions de boîte')
@@ -292,13 +265,10 @@ class CollisionWorld:
         point = (cad['inverse'] @ np.append(world_point, 1))[:3]
         if np.any(point < cad['bounds'][0]) or np.any(point > cad['bounds'][1]):
             return False
-<<<<<<< HEAD
         if cad['classifier'] is None:
             # Conservative containment for surface-only CAD. An enclosed link
             # is not declared safe merely because no triangles intersect.
             return True
-=======
->>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
         cad['classifier'].Perform(gp_Pnt(*(point*1000)), 0.01)
         return cad['classifier'].State() in (TopAbs_IN, TopAbs_ON)
 
@@ -332,14 +302,11 @@ class CollisionWorld:
                 hits = p.getClosestPoints(self.robot, self.robot, self_margin,
                     linkIndexA=int(a), linkIndexB=int(b), physicsClientId=self.client)
                 if hits:
-<<<<<<< HEAD
                     if self.refinement_robot is not None:
                         hits=p.getClosestPoints(self.refinement_robot,self.refinement_robot,self_margin,
                             linkIndexA=int(a),linkIndexB=int(b),physicsClientId=self.client)
                         if not hits:
                             continue
-=======
->>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
                     return f'auto-collision {a}/{b} ({hits[0][8]:.4f} m)'
         for obstacle in self.obstacles:
             if p.getClosestPoints(self.robot, obstacle['body'], margin, physicsClientId=self.client):
@@ -352,15 +319,12 @@ class CollisionWorld:
                 continue
             for hit in p.getClosestPoints(self.robot, cad['body'], margin, physicsClientId=self.client):
                 if hit[3] not in excluded:
-<<<<<<< HEAD
                     if self.refinement_robot is not None:
                         exact=p.getClosestPoints(self.refinement_robot,cad['body'],margin,
                             linkIndexA=hit[3],physicsClientId=self.client)
                         if not exact:
                             continue
                         hit=exact[0]
-=======
->>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
                     return f"bras / {cad['name']} (distance {hit[8]:.4f} m)"
             # Triangle surfaces alone miss a robot wholly enclosed inside a solid.
             for index in self.links.values():
@@ -454,7 +418,6 @@ class CollisionWorld:
                 raise ValueError('Collision sur la trajectoire temporisée')
 
     def require_hardware_ready(self):
-<<<<<<< HEAD
         if self.scene.get('simplification'):
             comparison=self.scene['simplification'].get('comparison')
             if not comparison or comparison.get('missed_source_collisions')!=[]:
@@ -466,8 +429,6 @@ class CollisionWorld:
                 and not self.scene.get('registration', {}).get('within_execution_tolerance')
                 and not self.scene.get('registration', {}).get('operator_accepted')):
             raise ValueError('CAD-to-arm registration exceeds execution tolerance; preview only')
-=======
->>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
         if self.scene.get('hardware_verified') is not True:
             raise ValueError('Placement CAD, affectations et géométrie de scène non validés sur le robot')
         if any(sha256(path) != digest for path, digest in self.files.items()):

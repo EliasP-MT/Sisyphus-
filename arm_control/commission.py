@@ -72,7 +72,7 @@ async def discover(sdk, host):
                     motors.append(dict(motor_id=motor.get_id(), ticks=ticks,
                         fresh=0 <= age <= 0.5, range_frozen=motor.get_range_freezed(),
                         min_ticks=motor.get_range_min(), max_ticks=motor.get_range_max(),
-                        status=raw[0x40] if len(raw) > 0x40 else None))
+                        status=raw[0x41] if len(raw) > 0x41 else None))
                 buses.append(dict(bus=bus.get_bus().get_serial_number(), motors=motors))
             if buses and any(m['fresh'] for b in buses for m in b['motors']):
                 return dict(buses=buses, writes_sent=0)
