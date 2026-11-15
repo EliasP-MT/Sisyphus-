@@ -9,6 +9,7 @@ import math
 import sys
 import time
 from datetime import datetime, timezone
+from contextlib import nullcontext
 from pathlib import Path
 
 import numpy as np
@@ -267,15 +268,24 @@ async def online(args, config):
                         max_acceleration_rad_s2=min(config['max_acceleration_rad_s2'], 0.1),
                         max_jerk_rad_s3=min(config['max_jerk_rad_s3'], 0.3))
         arm = Arm(args.urdf, cautious)
-        start = measured(station, cautious, powered=args.execute, stationary=True)
-        plan = await asyncio.to_thread(nudge_plan, arm, start, args.delta_mm)
-        actual = None
-        if args.execute:
-            actual = await execute(station, arm, plan)
-        return dict(executed=args.execute, collision_checked=False, start_q_rad=start.tolist(),
-                    target_xyz_m=plan['final_xyz_m'], duration_s=plan['samples'][-1]['t_s'],
-                    measured_q_rad=actual.tolist() if actual is not None else None,
-                    measured_xyz_from_encoders_m=arm.fk(actual)[:3, 3].tolist() if actual is not None else None)
+        if args.scene:
+            from collision import CollisionWorld
+            context = CollisionWorld(args.urdf, arm, args.scene)
+        else:
+            context = nullcontext(None)
+        with context as world:
+            arm.collision = world
+            if args.execute:
+                world.require_hardware_ready()
+            start = measured(station, cautious, powered=args.execute, stationary=True)
+            plan = await asyncio.to_thread(nudge_plan, arm, start, args.delta_mm)
+            actual = None
+            if args.execute:
+                actual = await execute(station, arm, plan)
+            return dict(executed=args.execute, collision_checked=bool(world), start_q_rad=start.tolist(),
+                        target_xyz_m=plan['final_xyz_m'], duration_s=plan['samples'][-1]['t_s'],
+                        measured_q_rad=actual.tolist() if actual is not None else None,
+                        measured_xyz_from_encoders_m=arm.fk(actual)[:3, 3].tolist() if actual is not None else None)
 
 
 def main():
@@ -284,6 +294,7 @@ def main():
     p.add_argument('--sdk', type=Path, default=HERE/'.sdk')
     p.add_argument('--urdf', type=Path, default=HERE/'.sdk/hardware/elrobot/simulation/elrobot_follower.urdf')
     p.add_argument('--host', default='localhost')
+    p.add_argument('--scene', type=Path, help='Scène de collision, obligatoire pour nudge --execute')
     p.add_argument('--output', type=Path, help='Nouveau fichier JSON ; aucun écrasement')
     sub = p.add_subparsers(dest='command', required=True)
     sub.add_parser('discover', help='Lister tous les bus/IDs, lecture seule')
@@ -303,6 +314,8 @@ def main():
     nudge.add_argument('--delta-mm', type=float, nargs=3, required=True)
     nudge.add_argument('--execute', action='store_true')
     args = p.parse_args()
+    if args.command == 'nudge' and args.execute and not args.scene:
+        p.error('nudge --execute exige --scene')
     try:
         if args.output and args.output.exists():
             raise ValueError('Le fichier de sortie existe déjà ; choisir un nouveau nom')

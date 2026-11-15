@@ -121,9 +121,9 @@ Depuis une pose dégagée et le candidat validé :
 
 ```bash
 arm_control/.venv/bin/python arm_control/commission.py --config arm_control/tcp-candidate.local.json \
-  nudge --delta-mm 2 0 0
+  --scene arm_control/robot_scene.local.json nudge --delta-mm 2 0 0
 arm_control/.venv/bin/python arm_control/commission.py --config arm_control/tcp-candidate.local.json \
-  nudge --delta-mm 2 0 0 --execute
+  --scene arm_control/robot_scene.local.json nudge --delta-mm 2 0 0 --execute
 ```
 
 Le déplacement relatif est exprimé dans `base_link`, orientation conservée,
@@ -137,7 +137,11 @@ peut ne pas se distinguer de cette tolérance.
 Sur défaut de suivi, état périmé, erreur servo ou retard, les envois cessent.
 Le dernier objectif et le couple restent actifs ; un déplacement en cours peut
 finir. Utiliser l’arrêt matériel prévu sur votre montage en cas de besoin.
-Les contrôles logiciels et l’amplitude réduite ne certifient pas un chemin libre.
+Le nudge exécuté exige maintenant une scène de collision validée ; la scène
+fournie doit être recalée selon [COLLISIONS.md](COLLISIONS.md). Le jog en ticks
+reste un outil manuel de calibration sans modèle cartésien : il n’évite pas
+automatiquement les collisions. Les contrôles logiciels et l’amplitude réduite
+ne certifient pas un chemin libre.
 
 ## 5. CAD et évitement des collisions
 
@@ -153,16 +157,9 @@ pour commencer avec des volumes simples. Fournir :
   dimensions de la lettre tenue et configuration de pince pendant le trajet.
 - Une marge tenant compte des erreurs de pose, du TCP, du jeu et de la flexion.
 
-La prochaine étape serait de charger les géométries de collision de l’URDF,
-la boîte et les objets dans un moteur de collision, puis d’utiliser un
-planificateur existant pour trouver un trajet libre. Les requêtes de distance
-de [PyBullet](https://github.com/bulletphysics/bullet3/blob/master/examples/pybullet/examples/getClosestPoints.py)
-et un planificateur [OMPL](https://ompl.kavrakilab.org/OMPL_Primer.pdf) permettent
-de séparer validation géométrique et recherche du chemin.
-Il faut vérifier les collisions du bras avec lui-même, l’objet tenu et
-l’environnement, y compris les mouvements entre configurations et la trajectoire
-finale après temporisation. Pour la boîte, utiliser des parois séparées ou une
-géométrie conservant les ouvertures : une enveloppe pleine fermerait la fente.
-
-Cette étape n’est pas implémentée ici : tous les essais indiquent encore
-`collision_checked=false`. Aucun essai réel n’a été lancé pendant le développement.
+Le STEP du robot et du sac est désormais enregistré sous `assets/full_robot.step`.
+Les neuf solides convertis sont intégrés au moteur PyBullet/OpenCascade et à la
+planification OMPL. Suivre [COLLISIONS.md](COLLISIONS.md) pour le recalage, les
+liaisons au robot et l’emploi de `--scene`. Les boîtes aux lettres extérieures
+restent à ajouter si elles doivent aussi être évitées. Aucun essai réel n’a été
+lancé pendant le développement.

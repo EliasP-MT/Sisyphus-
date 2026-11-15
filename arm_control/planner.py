@@ -80,6 +80,7 @@ def joints_to_ticks(c, q):
 class Arm:
     def __init__(self, urdf, config):
         self.c = config
+        self.collision = None
         root = ET.parse(urdf).getroot()
         # Walk BACK from the selected tool mount; never include the gripper branches.
         parents = {j.find('child').get('link'): j for j in root.findall('joint')}
@@ -206,21 +207,45 @@ class Arm:
                                  self.c['max_ik_step_rad'] if mode == 'linear' else None)
                 if mode == 'linear' and np.max(np.abs(next_q-q)) > self.c['max_ik_step_rad']:
                     raise ValueError('Discontinuité IK sur le chemin cartésien')
-                segment = self.segment(q, next_q)
-                offset = rows[-1]['t_s']
-                for row in segment[1:]:
-                    if mode == 'linear':
-                        pose = self.fk(row['q_rad'])
-                        delta = xyz-origin
-                        alpha = np.clip(np.dot(pose[:3, 3]-origin, delta)/max(np.dot(delta, delta), 1e-20), 0, 1)
-                        if np.linalg.norm(pose[:3, 3]-(origin+alpha*delta)) > self.c['position_tolerance_m']:
-                            raise ValueError('Écart excessif au segment cartésien')
-                        if Rotation.from_matrix(rotation.T @ pose[:3, :3]).magnitude() > self.c['orientation_tolerance_rad']:
-                            raise ValueError('Écart excessif à l’orientation du chemin')
-                    row['t_s'] += offset
-                    rows.append(row)
+                if self.collision and mode == 'joint':
+                    if not self.collision.valid(next_q):
+                        rng = np.random.default_rng(0)
+                        for _ in range(8):
+                            seed = rng.uniform(self.bounds[:, 0], self.bounds[:, 1])
+                            try:
+                                alternative = self.ik(xyz, seed, rotation)
+                                if self.collision.valid(alternative):
+                                    next_q = alternative
+                                    break
+                            except ValueError:
+                                continue
+                    path = self.collision.joint_path(q, next_q)
+                else:
+                    path = [q, next_q]
+                    if self.collision and not self.collision.motion_valid(q, next_q):
+                        raise ValueError('Approche cartésienne en collision ; aucun détour pendant une insertion droite')
+                for edge_start, edge_end in zip(path, path[1:]):
+                    segment = self.segment(edge_start, edge_end)
+                    offset = rows[-1]['t_s']
+                    for row in segment[1:]:
+                        if mode == 'linear':
+                            pose = self.fk(row['q_rad'])
+                            delta = xyz-origin
+                            alpha = np.clip(np.dot(pose[:3, 3]-origin, delta)/max(np.dot(delta, delta), 1e-20), 0, 1)
+                            if np.linalg.norm(pose[:3, 3]-(origin+alpha*delta)) > self.c['position_tolerance_m']:
+                                raise ValueError('Écart excessif au segment cartésien')
+                            if Rotation.from_matrix(rotation.T @ pose[:3, :3]).magnitude() > self.c['orientation_tolerance_rad']:
+                                raise ValueError('Écart excessif à l’orientation du chemin')
+                        row['t_s'] += offset
+                        rows.append(row)
                 q, origin = next_q, xyz
-        return {'frame': self.c['frame'], 'tip_link': self.c['tip_link'],
+        plan = {'frame': self.c['frame'], 'tip_link': self.c['tip_link'],
                 'tcp_xyz_m': self.c['tcp_xyz_m'], 'mode': mode,
-                'collision_checked': False, 'targets_xyz_m': [list(t) for t in targets],
+                'collision_checked': bool(self.collision), 'targets_xyz_m': [list(t) for t in targets],
                 'final_xyz_m': self.fk(q)[:3, 3].tolist(), 'samples': rows}
+        if self.collision:
+            plan.update(collision_scene_sha256=self.collision.fingerprint,
+                        collision_resolution_rad=self.collision.scene['edge_step_rad'])
+            self.collision.validate_plan(plan)
+            plan['collision_checks'] = self.collision.checks
+        return plan

@@ -1,10 +1,13 @@
 """Offline acceptance tests; ARM_URDF selects the unmodified official model."""
 import asyncio
 import copy
+import json
 import os
 import sys
 import time
+import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -59,6 +62,24 @@ def fake_station(c):
                 s.motors[mid].raw[0x38:0x3a] = value.to_bytes(2, 'little')
     s.write = write
     return s
+
+
+@contextmanager
+def collision_scene(arm, changes=None):
+    from collision import CollisionWorld
+    scene = dict(version=1, frame='base_link', hardware_verified=True, margin_m=0.005,
+                 self_margin_m=0.001, edge_step_rad=0.005, planning_time_s=5.0,
+                 gripper_angle_rad=0, cad=None, boxes=[], payload=None, allowed_self_pairs=[])
+    scene.update(changes or {})
+    with tempfile.TemporaryDirectory(prefix='elrobot-scene-test-') as directory:
+        path = Path(directory)/'scene.json'
+        path.write_text(json.dumps(scene))
+        with CollisionWorld(URDF, arm, path) as world:
+            arm.collision = world
+            try:
+                yield world
+            finally:
+                arm.collision = None
 
 
 class TransportTests(unittest.TestCase):
@@ -190,10 +211,11 @@ class ModelTests(unittest.TestCase):
     def test_executor_sends_only_arm_and_checks_arrival(self):
         c = calibration()
         arm = Arm(URDF, c)
-        s = fake_station(c)
         target = arm.fk(np.array([0.0008]*7))[:3, 3]
-        plan = arm.plan([0]*7, [target])
-        asyncio.run(execute(s, arm, plan))
+        with collision_scene(arm):
+            plan = arm.plan([0]*7, [target])
+            s = fake_station(c)
+            asyncio.run(execute(s, arm, plan))
         self.assertEqual([w[0] for w in s.writes[:2]], [0x2e, 0x29])
         self.assertTrue(all(w[0] in (0x2e, 0x29, 0x2a) and len(w[1]) == 7 for w in s.writes))
 
@@ -201,13 +223,14 @@ class ModelTests(unittest.TestCase):
         c = calibration()
         arm = Arm(URDF, c)
         target = arm.fk([0]*7)[:3, 3]
-        plan = arm.plan([0]*7, [target])
-        s = fake_station(c)
-        s.motors[1] = FakeMotor(ticks=2100)
-        with self.assertRaises(RuntimeError): asyncio.run(execute(s, arm, plan))
-        self.assertEqual(s.writes, [])
-        plan['samples'][-1]['q_rad'] = [20]*7
-        with self.assertRaises(ValueError): asyncio.run(execute(fake_station(c), arm, plan))
+        with collision_scene(arm):
+            plan = arm.plan([0]*7, [target])
+            s = fake_station(c)
+            s.motors[1] = FakeMotor(ticks=2100)
+            with self.assertRaises(RuntimeError): asyncio.run(execute(s, arm, plan))
+            self.assertEqual(s.writes, [])
+            plan['samples'][-1]['q_rad'] = [20]*7
+            with self.assertRaises(ValueError): asyncio.run(execute(fake_station(c), arm, plan))
 
 
 if __name__ == '__main__':

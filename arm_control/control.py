@@ -35,6 +35,8 @@ def main():
     parser.add_argument('--urdf', default=str(root/'.sdk/hardware/elrobot/simulation/elrobot_follower.urdf'))
     parser.add_argument('--sdk', default=str(root/'.sdk'))
     parser.add_argument('--host', default='localhost')
+    parser.add_argument('--scene', type=Path, help='Scène CAD/obstacles, obligatoire pour exécuter')
+    parser.add_argument('--preview', type=Path, help='Exporter une vue PNG de la scène (avec --scene)')
     sub = parser.add_subparsers(dest='command', required=True)
     sub.add_parser('state', help='Lire les encodeurs/calibrations Station, sans écriture')
     fk = sub.add_parser('fk', help='Calculer la pose du TCP hors ligne')
@@ -52,16 +54,32 @@ def main():
     args = parser.parse_args()
     if args.command == 'plan' and args.execute and not args.from_station:
         parser.error('--execute exige --from-station, jamais une pose de départ supposée')
+    if args.command == 'plan' and args.execute and not args.scene:
+        parser.error('--execute exige --scene pour le contrôle de collisions')
+    if args.preview and (not args.scene or args.command == 'state'):
+        parser.error('--preview exige --scene et une commande fk ou plan')
+    world = None
     try:
         c = load_config(args.config)
         arm = None if args.command == 'state' else Arm(args.urdf, c)
+        if args.scene and arm:
+            from collision import CollisionWorld
+            world = CollisionWorld(args.urdf, arm, args.scene)
+            arm.collision = world
+            if args.command == 'plan' and args.execute:
+                world.require_hardware_ready()
         if args.command == 'state' or (args.command == 'plan' and args.from_station):
             result = asyncio.run(online(args, c, arm))
         elif args.command == 'fk':
             result = {'frame': c['frame'], 'tcp_transform': arm.fk(args.joints).tolist()}
+            if world:
+                result['collision_reason'] = world.collision(args.joints)
+                result['collision_checked'] = True
         else:
             rotation = Rotation.from_euler('xyz', args.rpy).as_matrix() if args.rpy else None
             result = arm.plan(args.start, args.via+[args.target], args.mode, rotation)
+        if args.preview:
+            world.save_preview(args.preview, args.joints if args.command == 'fk' else result['samples'][-1]['q_rad'])
         if args.command == 'plan':
             if args.output:
                 args.output.write_text(json.dumps(result, indent=2, allow_nan=False)+'\n')
@@ -73,6 +91,9 @@ def main():
         parser.exit(130, 'Interrompu ; dernière consigne et couple conservés.\n')
     except (ValueError, RuntimeError, OSError, ImportError, KeyError, TypeError, asyncio.TimeoutError) as exc:
         parser.exit(1, f'Erreur : {exc}\n')
+    finally:
+        if world:
+            world.close()
 
 
 if __name__ == '__main__':

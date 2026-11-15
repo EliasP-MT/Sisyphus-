@@ -1,5 +1,6 @@
 """Reuse the repository's ST3215 transport; add arm mapping and execution guards."""
 import asyncio
+import copy
 import importlib.util
 import logging
 import sys
@@ -62,14 +63,25 @@ def measured(station, config, *, powered=False, stationary=False):
 
 async def execute(station, arm, plan):
     c = arm.c
+    world = arm.collision
+    if world is None or not plan.get('collision_checked'):
+        raise ValueError('Exécution refusée sans scène et trajectoire contrôlées pour les collisions')
+    world.require_hardware_ready()
     # Validate every quantized setpoint BEFORE any write.
     goals = [joints_to_ticks(c, s['q_rad']) for s in plan['samples']]
     for goal in goals:
         arm.check(ticks_to_joints(c, goal))
+    quantized = copy.deepcopy(plan)
+    for sample, goal in zip(quantized['samples'], goals):
+        sample['q_rad'] = ticks_to_joints(c, goal).tolist()
+    await asyncio.to_thread(world.validate_plan, quantized)
+    world.require_hardware_ready()
     actual = measured(station, c, powered=True, stationary=True)
     previous = np.asarray(plan['samples'][0]['q_rad'])
     if np.max(np.abs(actual-previous)) > 0.02:
         raise RuntimeError('Le bras a bougé pendant le calcul ; recalculer le plan')
+    if not world.motion_valid(actual, quantized['samples'][0]['q_rad']):
+        raise RuntimeError('Départ mesuré en collision')
     quantized_final = arm.fk(ticks_to_joints(c, goals[-1]))[:3, 3]
     if np.linalg.norm(quantized_final-plan['targets_xyz_m'][-1]) > c['position_tolerance_m']:
         raise RuntimeError('Précision insuffisante après conversion encodeur')
@@ -82,6 +94,7 @@ async def execute(station, arm, plan):
         if time.monotonic()-deadline > 0.1:
             raise RuntimeError('Boucle de commande en retard ; arrêt de l’envoi')
         actual = measured(station, c, powered=True)
+        world.require_pose(actual, 'Position mesurée')
         if np.max(np.abs(actual-previous)) > c['tracking_error_rad']:
             raise RuntimeError('Erreur de suivi excessive ; arrêt de l’envoi')
         await station.write(0x2a, goal, 2)

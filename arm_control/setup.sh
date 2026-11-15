@@ -5,7 +5,7 @@ python3 -m venv --without-pip .venv
 if [[ ! -f .pip.pyz ]]; then
   curl --fail --location https://bootstrap.pypa.io/pip/pip.pyz -o .pip.pyz
 fi
-.venv/bin/python .pip.pyz install -r requirements.txt
+.venv/bin/python .pip.pyz install -r requirements-collision.txt
 # Same official revision as hand_control/setup.sh. No Station launch or motor writes.
 if [[ ! -d .sdk/.git ]]; then
   git init .sdk

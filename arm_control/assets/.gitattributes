@@ -1,0 +1,2 @@
+*.step binary
+*.obj text eol=lf

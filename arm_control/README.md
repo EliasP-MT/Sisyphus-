@@ -82,6 +82,11 @@ CAD et mesures nécessaires à l’évitement des collisions.
 
 ## Préparation au matériel
 
+L’évitement de collisions est décrit dans [COLLISIONS.md](COLLISIONS.md) :
+conversion du STEP fourni, rattachement du châssis/sac au socle, recalage du CAD,
+auto-collisions du bras et détours OMPL. `--execute` exige désormais `--scene`
+avec un placement et une géométrie validés. L’exemple de scène est non recalé.
+
 Copier `elrobot.example.json` vers `arm_control/elrobot.local.json` (ignoré par Git).
 Le modèle fourni est volontairement incomplet : IDs `1..7` indicatifs,
 `hardware_verified=false` et zéros/signes/limites absents.
@@ -108,7 +113,7 @@ Planifier depuis les positions mesurées **sans mouvement** :
 
 ```bash
 arm_control/.venv/bin/python arm_control/control.py \
-  --config arm_control/elrobot.local.json plan --from-station \
+  --config arm_control/elrobot.local.json --scene arm_control/robot_scene.local.json plan --from-station \
   --target 0.02 0.23 0.25 --output /tmp/elrobot-plan.json
 ```
 
@@ -122,12 +127,14 @@ le suivi, les retards et l’arrivée mesurée avant de signaler un succès.
 
 ## Limites de cette étape
 
-**Aucun contrôle de collision ni contournement automatique** : le JSON indique
-`collision_checked=false`. Les points de passage sont fournis par l’appelant ;
-les boîtes, le support, la lettre, les câbles, le châssis Kiwi et les collisions
-du bras avec lui-même ne sont pas modélisés. Une cible atteignable ne garantit
-pas un chemin libre. Une scène géométrique et un planificateur de collision
-seront nécessaires pour automatiser ce choix.
+Avec `--scene`, le JSON indique `collision_checked=true` et contient l’empreinte
+de la scène. Les segments sont vérifiés avec PyBullet et, pour le CAD fermé,
+OpenCascade. En mode articulaire, OMPL cherche un détour si la liaison directe
+est bloquée ; en approche droite, le programme refuse une collision. Les lignes
+sans `--scene` restent disponibles hors ligne et portent `collision_checked=false`.
+Les objets absents de la scène, les câbles et les variations de géométrie réelle
+ne sont pas détectés. La validation géométrique est discrète et nominale ;
+consulter les limites et les exclusions mécaniques dans COLLISIONS.md.
 
 Les limites Ruckig concernent les consignes calculées ; le réseau, les servos
 et leur discrétisation ne garantissent pas le jerk réel. Les tolérances de
