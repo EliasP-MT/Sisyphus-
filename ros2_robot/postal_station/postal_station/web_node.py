@@ -195,7 +195,8 @@ class Station(Node):
             return {'success': r.success, 'message': r.message, 'calibration_sha256': r.calibration_sha256,
                     'poses': [msg_dict(p) for p in r.poses]}
         if path == '/api/plan':
-            r = self.call('plan', timeout=150., pose_name=str(body['pose']))
+            r = self.call('plan', timeout=150., pose_name=str(body['pose']),
+                          speed_factor=float(body.get('speed_factor', 1.)))
             return {'success': r.success, 'executable': r.executable, 'plan_id': r.plan_id,
                     'message': r.message, 'reasons': list(r.reasons), 'duration_s': r.duration_s,
                     'points': len(r.trajectory.points)}

@@ -40,6 +40,10 @@ class Planner:
         self.arm.collision = self.world
         self.lock = threading.Lock()
         self.ready_cache, self.ready_time = None, 0.
+        import xml.etree.ElementTree as ET
+        limits = [float(j.find('limit').get('velocity')) for j in ET.parse(URDF).getroot().findall('joint')
+                  if j.get('name') in [f'rev_motor_{i:02d}' for i in range(1, 8)]]
+        self.urdf_velocity = min(limits)
 
     def readiness(self):
         """Scene readiness (hashes every geometry file): cached 20 s for /status.
@@ -73,21 +77,33 @@ class Planner:
                 raise ValueError(f"{label}: {j['name']} at {t} ticks is outside the operating margin "
                                  f"{j['min_ticks']}..{j['max_ticks']}; not clipped. Reposition first.")
 
-    def plan(self, start_ticks, goal_ticks):
+    def plan(self, start_ticks, goal_ticks, speed_factor=1.):
+        f = float(speed_factor)
+        if not (0.1 <= f <= self.max_speed_factor):
+            raise ValueError(f'speed_factor must be within 0.1..{self.max_speed_factor}')
+        if self.config['max_velocity_rad_s'] * f > self.urdf_velocity:
+            raise ValueError('Requested speed exceeds the URDF joint velocity limit')
         self._check_ticks(start_ticks, 'Current arm')
         self._check_ticks(goal_ticks, 'Target pose')
         with self.lock:
             begin = time.monotonic()
             c, arm, world = self.config, self.arm, self.world
             start, end = ticks_to_joints(c, start_ticks), ticks_to_joints(c, goal_ticks)
-            path = world.joint_path(start, end)
+            path = world.joint_path(start, end)  # geometry does not depend on speed
+            keys = ('max_velocity_rad_s', 'max_acceleration_rad_s2', 'max_jerk_rad_s3')
+            saved = {k: c[k] for k in keys}
             rows = []
-            for a, b in zip(path, path[1:]):
-                segment = arm.segment(a, b)
-                offset = rows[-1]['t_s'] if rows else 0.
-                for row in (segment[1:] if rows else segment):
-                    row['t_s'] += offset
-                    rows.append(row)
+            try:
+                for k in keys:  # Ruckig limits only; restored before readiness checks
+                    c[k] = saved[k] * f
+                for a, b in zip(path, path[1:]):
+                    segment = arm.segment(a, b)
+                    offset = rows[-1]['t_s'] if rows else 0.
+                    for row in (segment[1:] if rows else segment):
+                        row['t_s'] += offset
+                        rows.append(row)
+            finally:
+                c.update(saved)
             plan = dict(samples=rows, collision_checked=True, collision_scene_sha256=world.fingerprint,
                         targets_xyz_m=[arm.fk(end)[:3, 3].tolist()])
             world.validate_plan(plan)
@@ -107,7 +123,8 @@ class Planner:
                         calibration_sha256=self.calibration_sha, waypoints=len(path),
                         reasons=reasons, executable=not reasons,
                         compensation_limit_rad=compensation, compensation_note=note,
-                        planning_s=time.monotonic() - begin, collision_checks=world.checks)
+                        planning_s=time.monotonic() - begin, collision_checks=world.checks,
+                        speed_factor=f)
 
     def _compensation_box(self, final, joints=(1, 2, 3), limit=.06):
         """Validate the static-error compensation box around the final pose.
@@ -165,7 +182,8 @@ def serve(planner, port):
             try:
                 body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))) or b'{}')
                 if self.path == '/plan':
-                    return self.reply(200, planner.plan(body['start_ticks'], body['goal_ticks']))
+                    return self.reply(200, planner.plan(body['start_ticks'], body['goal_ticks'],
+                                                        body.get('speed_factor', 1.)))
                 if self.path == '/check':
                     return self.reply(200, planner.check(body['ticks']))
                 self.reply(404, {'error': 'not found'})
@@ -182,8 +200,12 @@ def main():
     parser.add_argument('--calibration', required=True)
     parser.add_argument('--scene', required=True)
     parser.add_argument('--port', type=int, default=8893)
+    parser.add_argument('--max-speed-factor', type=float, default=2.,
+                        help='must not exceed the robot max_speed_factor parameter')
     args = parser.parse_args()
-    serve(Planner(args.calibration, args.scene), args.port)
+    planner = Planner(args.calibration, args.scene)
+    planner.max_speed_factor = args.max_speed_factor
+    serve(planner, args.port)
 
 
 if __name__ == '__main__':

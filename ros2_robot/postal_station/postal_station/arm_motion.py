@@ -133,7 +133,9 @@ class ArmMotion(Node):
             if pose is None:
                 raise RuntimeError(f'Unknown pose "{request.pose_name}"')
             start = self.measured_ticks()
-            result = self.request('/plan', {'start_ticks': start[:7], 'goal_ticks': list(pose.ticks)[:7]})
+            speed = request.speed_factor or 1.
+            result = self.request('/plan', {'start_ticks': start[:7], 'goal_ticks': list(pose.ticks)[:7],
+                                            'speed_factor': speed})
             reasons = list(result['reasons'])
             if pose.warnings:
                 reasons += [f'pose warning: {w}' for w in pose.warnings]
@@ -154,7 +156,7 @@ class ArmMotion(Node):
             response.success, response.executable, response.plan_id = True, not reasons, plan_id
             response.reasons, response.duration_s = reasons, result['duration_s']
             response.collision_scene_sha256, response.trajectory = result['collision_scene_sha256'], traj
-            response.message = (f'Collision-free plan, {result["duration_s"]:.1f} s, '
+            response.message = (f'Collision-free plan at {speed:g}x speed, {result["duration_s"]:.1f} s, '
                                 f'{len(result["times"])} checked samples, planned in {result["planning_s"]:.1f} s; '
                                 f'{result["compensation_note"]}')
             self.set_status('planned', response.message + ('' if not reasons else '; NOT executable: ' + '; '.join(reasons)))

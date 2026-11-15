@@ -54,6 +54,8 @@ progress{width:100%}.banner{padding:8px 10px;border-radius:6px;margin:4px 0}.ban
     <label><input type="checkbox" id="armSupport"> arm supported</label>
     <button id="armOff" class="danger">Disable</button></div>
   <div class="scroll"><table id="poses"><thead><tr><th class="l"></th><th class="l">Pose</th><th class="l">Recorded</th><th class="l">Warnings</th></tr></thead><tbody></tbody></table></div>
+  <div class="row">Speed <input type="number" id="speed" value="1" min="0.1" max="2" step="0.1" style="width:5em">× calibrated
+    <span class="muted">(0.1–2; collision path unchanged)</span></div>
   <div class="row"><button id="plan" class="primary">Plan to selected</button>
     <label><input type="checkbox" id="withGripper"> then gripper</label>
     <button id="execute" disabled>Execute plan</button><button id="cancel" class="danger">Cancel motion</button></div>
@@ -239,7 +241,9 @@ $('delete').onclick = async () => {
 $('plan').onclick = async () => {
   if (!selected) { log('Select a pose', 'bad'); return; }
   plan = null; $('planBox').dataset.status = 'planning…'; renderPlan(); $('plan').disabled = true;
-  const r = await act('/api/plan', {pose: selected}, 'plan ' + selected);
+  const speed = parseFloat($('speed').value);
+  if (!(speed >= 0.1 && speed <= 2)) { log('Speed must be between 0.1 and 2', 'bad'); $('plan').disabled = false; return; }
+  const r = await act('/api/plan', {pose: selected, speed_factor: speed}, `plan ${selected} at ${speed}x`);
   $('plan').disabled = false;
   if (r.success) { plan = {...r, pose: selected, used: false}; renderPlan(); }
 };

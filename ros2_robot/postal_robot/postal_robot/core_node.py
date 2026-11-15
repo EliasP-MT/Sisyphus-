@@ -95,6 +95,7 @@ class Core(Node):
         p('arrival_tolerance_rad', .01)
         p('arrival_timeout_s', 8.)
         p('max_compensation_rad', .06)
+        p('max_speed_factor', 2.)
         p('stationary_speed_ticks_s', 10)
         p('publish_odom_tf', False)
         g = lambda name: self.get_parameter(name).value
@@ -127,7 +128,7 @@ class Core(Node):
                                       'dispenser_default_speed', 'dispenser_max_duration_s',
                                       'gripper_min_ticks', 'gripper_max_ticks', 'gripper_speed_ticks_s',
                                       'start_tolerance_rad', 'arrival_tolerance_rad', 'arrival_timeout_s',
-                                      'stationary_speed_ticks_s', 'publish_odom_tf', 'max_compensation_rad')}
+                                      'stationary_speed_ticks_s', 'publish_odom_tf', 'max_compensation_rad', 'max_speed_factor')}
         if not 0 < abs(self.cfg['dispenser_default_speed']) <= 1000:
             raise ValueError('Dispenser default speed must be within -1000..1000 and non-zero')
         if not 0 < self.cfg['dispenser_max_duration_s'] <= 60:
@@ -783,6 +784,7 @@ class Core(Node):
                                 arrival_tolerance=self.cfg['arrival_tolerance_rad'],
                                 arrival_timeout=self.cfg['arrival_timeout_s'],
                                 max_step_gap=max(.25, 4 * self.period),
+                                max_speed_factor=self.cfg['max_speed_factor'],
                                 compensation=[min(c, self.cfg['max_compensation_rad'])
                                               for c in goal.compensation_limit_rad] or None)
 
@@ -801,8 +803,11 @@ class Core(Node):
                 if measured is None:
                     raise RuntimeError('Fresh arm feedback unavailable')
                 c = self.calibration.data
-                for i in range(1, 8):
-                    self._write(i, st3215.GOAL_SPEED, c['servo_speed_ticks_s'])
+                base, cap = c['servo_speed_ticks_s'], c['servo_speed_ticks_s'] * self.cfg['max_speed_factor']
+                for i, peak in zip(range(1, 8), run.peak_ticks_per_s()):
+                    # Servo speed follows the plan (25 % headroom), never below the
+                    # calibrated speed nor above the configured ceiling.
+                    self._write(i, st3215.GOAL_SPEED, int(min(cap, max(base, math.ceil(peak * 1.25)))))
                     self._write(i, st3215.ACCELERATION, c['servo_acceleration'])
                 run.begin(measured, time.monotonic())
                 self.run, self.run_plan = run, goal.plan_id
