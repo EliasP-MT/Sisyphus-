@@ -20,9 +20,9 @@ class TrajectoryError(ValueError):
 
 class TrajectoryRun:
     def __init__(self, calibration, names, times, points, *, start_tolerance=.02,
-                 arrival_tolerance=.01, arrival_timeout=8., max_step_gap=.25,
+                 arrival_tolerance=.01, arrival_timeout=20., max_step_gap=.25,
                  velocity_margin=1.25, max_speed_factor=1., compensation=None, settle_time=.4, settle_rad=.003,
-                 max_compensation_steps=5):
+                 max_compensation_steps=20, tracking_margin=.1):
         if tuple(names) != JOINTS:
             raise TrajectoryError('Trajectory must list rev_motor_01..07 in order')
         if len(times) < 2 or len(times) != len(points) or len(times) > 100000:
@@ -55,9 +55,14 @@ class TrajectoryRun:
         peak = max((max(abs(b - a) for a, b in zip(points[i - 1], points[i])) / (times[i] - times[i - 1])
                     for i in range(1, len(points))), default=0.)
         self.speed_ratio = max(1., peak / c['max_velocity_rad_s']) if c.get('max_velocity_rad_s') else 1.
-        self.tracking_error *= self.speed_ratio
+        # Proportional part + fixed margin so that load/gravity variations do not
+        # stop a valid motion; a real stall (error far beyond) still aborts.
+        self.tracking_error = self.tracking_error * self.speed_ratio + tracking_margin
         self.bias = [0.] * 7
         self.start_tolerance, self.arrival_tolerance = start_tolerance, arrival_tolerance
+        # Immediate success only within the exact tolerance; a looser one (poses next to
+        # an obstacle) is accepted only once the arm has settled and compensation is exhausted.
+        self.exact = min(arrival_tolerance, .01)
         self.arrival_timeout, self.max_step_gap = arrival_timeout, max_step_gap
         compensation = list(compensation or [0.] * 7)
         if len(compensation) != 7 or any(not (math.isfinite(c) and 0 <= c <= .1) for c in compensation):
@@ -105,10 +110,11 @@ class TrajectoryRun:
             return self._abort(f'Control loop late by {now - self.last_step:.3f} s; motion stopped')
         self.last_step = now
         reference = self.points[max(self.commanded, 0)]  # planned pose, not the offset goal
-        error = max(abs(a - b - o) for a, b, o in zip(measured, reference, self.bias))
+        errors = [abs(a - b - o) for a, b, o in zip(measured, reference, self.bias)]
+        error = max(errors)
         self.max_tracking = max(self.max_tracking, error)
         if error > self.tracking_error:
-            return self._abort(f'Tracking error {error:.3f} rad exceeds {self.tracking_error} rad')
+            return self._abort(f'Tracking error {error:.3f} rad on J{errors.index(error) + 1} exceeds {self.tracking_error:.3f} rad')
         elapsed = now - self.start_time
         index = self.commanded
         while index + 1 < len(self.times) and self.times[index + 1] <= elapsed:
@@ -132,24 +138,29 @@ class TrajectoryRun:
         errors = [b - a for a, b in zip(measured, final)]
         error = max(abs(e) for e in errors)
         used = max(abs(o) for o in self.offset)
-        if error <= self.arrival_tolerance:
-            self.state = SUCCEEDED
-            self.message = f'Arrived (max joint error {error:.4f} rad' + (
-                f', static-error compensation {used:.3f} rad in {self.steps} step(s))' if self.steps else ')')
-            return None
+        if error <= self.exact:
+            return self._arrived(error, used)
         if now - self.start_time > self.duration + self.arrival_timeout:
+            if error <= self.arrival_tolerance:
+                return self._arrived(error, used)
             return self._abort(f'Final position not reached: error {error:.4f} rad after timeout'
                                + (f' (compensation {used:.3f} rad)' if self.steps else ''))
         if self.settled_ref is None or max(abs(a - b) for a, b in zip(measured, self.settled_ref)) > self.settle_rad:
             self.settled_ref, self.last_motion = list(measured), now
             return None
-        if now - self.last_motion < self.settle_time or not any(self.compensation):
+        if now - self.last_motion < self.settle_time:
             return None
-        if self.steps >= self.max_steps:
+        if not any(self.compensation) or self.steps >= self.max_steps:
+            if error <= self.arrival_tolerance:
+                return self._arrived(error, used)
+            if not any(self.compensation):
+                return None
             return self._abort(f'Final position not reached after {self.steps} compensation steps: error {error:.4f} rad')
-        offset = [max(-c, min(c, o + e)) if c > 0 and abs(e) > self.arrival_tolerance / 2 else o
+        offset = [max(-c, min(c, o + e)) if c > 0 and abs(e) > self.exact / 2 else o
                   for o, e, c in zip(self.offset, errors, self.compensation)]
         if offset == self.offset:
+            if error <= self.arrival_tolerance:
+                return self._arrived(error, used)
             return self._abort(f'Static error {error:.4f} rad exceeds the validated compensation bound')
         try:
             goal = [self.calibration.to_ticks(n, q + o) for n, q, o in zip(JOINTS, final, offset)]
@@ -157,6 +168,12 @@ class TrajectoryRun:
             return self._abort(f'Compensated goal refused: {exc}')
         self.offset, self.steps, self.last_motion = offset, self.steps + 1, now
         return goal
+
+    def _arrived(self, error, used):
+        self.state = SUCCEEDED
+        self.message = f'Arrived (max joint error {error:.4f} rad' + (
+            f', static-error compensation {used:.3f} rad in {self.steps} step(s))' if self.steps else ')')
+        return None
 
     def _abort(self, message):
         self.state, self.message = ABORTED, message

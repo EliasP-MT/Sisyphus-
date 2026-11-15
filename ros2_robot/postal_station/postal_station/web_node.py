@@ -90,6 +90,8 @@ class Station(Node):
             ('gripper', SetGripper, '/robot/gripper/set'), ('capture', CapturePose, '/robot/poses/capture'),
             ('list', ListPoses, '/robot/poses/list'), ('delete', DeletePose, '/robot/poses/delete'),
             ('plan', PlanToPose, '/station/arm/plan_to_pose')]}
+        from .tasks import TaskRunner
+        self.tasks = TaskRunner(self)
         self.go = ActionClient(self, GoToPose, '/station/arm/go_to_pose', callback_group=cb)
         self.create_timer(.1, self.tick, callback_group=cb)
         self.page = (Path(get_package_share_directory('postal_station')) / 'web' / 'index.html').read_text()
@@ -161,7 +163,7 @@ class Station(Node):
         return {'session': self.session, 'browser_lease': self.browser_alive(), 'ages_s': ages,
                 'supervisor': msg_dict(sup) if sup else None, 'motors': msg_dict(motors)['motors'] if motors else [],
                 'joints': dict(zip(joints.name, joints.position)) if joints else {},
-                'cameras': cams, 'arm_status': self.arm_status, 'go': go, 'planner': self.planner_status}
+                'cameras': cams, 'arm_status': self.arm_status, 'task': self.tasks.snapshot(), 'go': go, 'planner': self.planner_status}
 
     def api(self, path, body):
         if path == '/api/ping':
@@ -202,6 +204,12 @@ class Station(Node):
                     'points': len(r.trajectory.points)}
         if path == '/api/execute':
             return self.execute(str(body['plan_id']), bool(body.get('include_gripper')))
+        if path == '/api/task/plan':
+            return self.tasks.prepare(str(body['task']), float(body.get('speed_factor', 1.)))
+        if path == '/api/task/start':
+            return self.tasks.start()
+        if path == '/api/task/stop':
+            return self.tasks.stop()
         if path == '/api/cancel':
             if self.go_handle is None:
                 return {'success': False, 'message': 'No motion in progress'}

@@ -41,6 +41,17 @@ progress{width:100%}.banner{padding:8px 10px;border-radius:6px;margin:4px 0}.ban
 <main>
 <section class="wide" id="alerts"></section>
 
+<section class="wide" id="tasksBox"><h2>Tasks</h2>
+  <div class="row">Task <select id="taskSel"></select>
+    Speed <input type="number" id="taskSpeedIn" value="1" min="0.1" max="2" step="0.1" style="width:5em">×
+    <button id="taskPlan">Plan</button>
+    <button id="taskStart" class="primary" disabled>Start task</button>
+    <button id="taskStop" class="danger">Stop</button></div>
+  <div id="taskMsg" class="muted"></div>
+  <ol id="taskSteps" style="margin:6px 0;padding-left:22px"></ol>
+  <div class="muted">Plan covers the whole sequence before anything moves (first leg from the current pose, the others between stored poses). Start only runs the precomputed plans; any failure stops the dispenser and holds the arm.</div>
+</section>
+
 <section class="wide"><h2>Cameras</h2>
   <div class="cams">
     <div class="cam"><img id="cam1" alt="camera 1"><span id="cam1age">camera 1</span></div>
@@ -184,6 +195,23 @@ function render() {
   if (go && go.feedback) $('progress').value = go.feedback.progress;
   if (st.message) $('planBox').dataset.status = st.stage + ': ' + st.message;
   renderPlan();
+  renderTask(s.task);
+}
+function renderTask(t) {
+  if (!t) return;
+  const sel = $('taskSel');
+  if (!sel.options.length) for (const [k, v] of Object.entries(t.tasks)) sel.add(new Option(v, k));
+  const cls = {ok: 'ok', failed: 'bad', running: 'warn', planning: 'warn'};
+  const mark = {pending: '○', planning: '…', running: '▶', ok: '✓', failed: '✗'};
+  $('taskSteps').innerHTML = t.steps.map(s => `<li class="${cls[s.status] || 'muted'}">${mark[s.status] || ''} ${esc(s.label)}` +
+    `${s.detail ? ' <span class="muted">— ' + esc(s.detail) + '</span>' : ''}</li>`).join('');
+  const busy = t.phase === 'planning' || t.phase === 'running';
+  $('taskMsg').innerHTML = `<b class="${{ready: 'ok', done: 'ok', failed: 'bad', canceled: 'bad'}[t.phase] || ''}">${esc(t.phase)}</b> ${esc(t.message)}` +
+    (t.phase === 'ready' && t.prepared_age_s !== null ? ` <span class="muted">(planned ${Math.round(t.prepared_age_s)} s ago, valid 10 min)</span>` : '');
+  $('taskPlan').disabled = busy;
+  $('taskPlan').textContent = t.phase === 'failed' || t.phase === 'canceled' ? 'Retry plan' : 'Plan';
+  $('taskSpeedIn').disabled = busy;
+  $('taskStart').disabled = t.phase !== 'ready';
 }
 function renderPlan() {
   const st = $('planBox').dataset.status || '';
@@ -212,6 +240,9 @@ async function loadPoses() {
   for (const r of document.querySelectorAll('input[name=pose]')) r.onchange = () => { selected = r.value; plan = null; renderPlan(); };
 }
 
+$('taskPlan').onclick = () => act('/api/task/plan', {task: $('taskSel').value, speed_factor: parseFloat($('taskSpeedIn').value) || 1}, 'task plan');
+$('taskStart').onclick = () => act('/api/task/start', {}, 'task start');
+$('taskStop').onclick = () => act('/api/task/stop', {}, 'task stop');
 $('ack').onclick = () => act('/api/ack', {}, 'acknowledge');
 $('armOn').onclick = () => act('/api/torque', {group: 'arm', enable: true}, 'arm torque on');
 $('armOff').onclick = () => {

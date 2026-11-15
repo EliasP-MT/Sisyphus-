@@ -126,28 +126,52 @@ class Planner:
                         planning_s=time.monotonic() - begin, collision_checks=world.checks,
                         speed_factor=f)
 
-    def _compensation_box(self, final, joints=(1, 2, 3), limit=.06):
-        """Validate the static-error compensation box around the final pose.
+    def _compensation_box(self, final, limit=.06):
+        """Validate the per-joint static-error compensation bounds around the final pose.
 
-        Every grid point of final +/- limit on the gravity-loaded joints
-        (J2, J3, J4), and the straight motion from the final pose to it, must be
-        within calibration and collision-free; otherwise no compensation."""
+        Each joint gets the largest bound (<= limit) whose motion from the final pose
+        to final +/- bound is within calibration and collision-free; then every
+        vertex of the resulting box (and the straight motion to it) must be valid,
+        halving all bounds until it is. Poses next to an obstacle therefore keep a
+        smaller, still validated, bound instead of losing compensation altogether."""
         import itertools
         import numpy as np
-        for deltas in itertools.product((-limit, 0., limit), repeat=len(joints)):
-            q = np.array(final, dtype=float)
-            for j, d in zip(joints, deltas):
-                q[j] += d
+        final = np.array(final, dtype=float)
+
+        def valid(q):
             try:
                 joints_to_ticks(self.config, self.arm.check(q))
-            except ValueError as exc:
-                return [0.] * 7, f'compensation unavailable ({exc})'
-            if not self.world.motion_valid(final, q):
-                return [0.] * 7, 'compensation unavailable (box around the target is not collision-free)'
+            except ValueError:
+                return False
+            return self.world.motion_valid(final, q)
+
         bounds = [0.] * 7
-        for j in joints:
-            bounds[j] = limit
-        return bounds, f'static-error compensation up to {limit} rad validated on J2-J4'
+        for j in range(7):
+            for b in (limit, .04, .025, .012):
+                ok = True
+                for d in (-b, b):
+                    q = final.copy()
+                    q[j] += d
+                    ok = ok and valid(q)
+                if ok:
+                    bounds[j] = b
+                    break
+        for _ in range(4):
+            active = [j for j in range(7) if bounds[j] > 0]
+            if not active:
+                break
+            if all(valid(final + np.array([d * bounds[j] if j in active else 0. for j, d in
+                                           zip(range(7), signs)]))
+                   for signs in itertools.product((-1., 1.), repeat=7) if all(
+                       signs[j] == 1. for j in range(7) if j not in active)):
+                break
+            bounds = [b / 2 if b / 2 >= .006 else 0. for b in bounds]
+        else:
+            bounds = [0.] * 7
+        if not any(bounds):
+            return [0.] * 7, 'compensation unavailable (no validated collision-free bound around the target)'
+        text = ', '.join(f'J{j + 1} {b:g}' for j, b in enumerate(bounds) if b)
+        return bounds, f'static-error compensation (rad) {text} validated'
 
     def check(self, ticks):
         """Collision check of a MEASURED pose (execution monitor)."""

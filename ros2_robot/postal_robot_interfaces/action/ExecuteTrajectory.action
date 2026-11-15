@@ -8,6 +8,11 @@ string collision_scene_sha256                 # must be non-empty
 # Per-joint bound (rad) of the static-error compensation at the final pose,
 # validated collision-free by the planner; empty or 0 = no compensation.
 float64[] compensation_limit_rad
+# Looser acceptance (rad) for poses next to an obstacle where the servo cannot reach
+# the exact target; 0 = robot defaults. Success then also needs the arm to be settled.
+# Capped by the robot (max 0.08).
+float64 arrival_tolerance_rad
+float64 start_tolerance_rad      # for a leg that starts from such a pose
 ---
 int8 SUCCEEDED=0
 int8 REJECTED=1
