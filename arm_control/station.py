@@ -40,7 +40,10 @@ async def connection(config, sdk, host):
             await asyncio.sleep(0.02)
         else:
             raise RuntimeError('Aucun état Station reçu')
+<<<<<<< HEAD
         await fresh_feedback(station)
+=======
+>>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
         yield station
     finally:
         worker.cancel()
@@ -48,6 +51,7 @@ async def connection(config, sdk, host):
         client.close_connection()
 
 
+<<<<<<< HEAD
 async def fresh_feedback(station, timeout=3.0):
     """Yield to the reader after CPU/file work; never relax sample-age checks."""
     deadline = time.monotonic()+timeout
@@ -62,6 +66,8 @@ async def fresh_feedback(station, timeout=3.0):
                 raise RuntimeError('Fresh motor feedback did not resume; no motion started') from exc
 
 
+=======
+>>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
 def measured(station, config, *, powered=False, stationary=False):
     require_calibration(config)
     states = station.state()
@@ -76,14 +82,22 @@ def measured(station, config, *, powered=False, stationary=False):
     return ticks_to_joints(config, [s[0] for s in states])
 
 
+<<<<<<< HEAD
 async def execute(station, arm, plan, progress=None, paced=False, command_period=None):
     progress = progress or (lambda message: None)
     progress('Checking calibrated targets and quantized collision path')
+=======
+async def execute(station, arm, plan):
+>>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
     c = arm.c
     world = arm.collision
     if world is None or not plan.get('collision_checked'):
         raise ValueError('Exécution refusée sans scène et trajectoire contrôlées pour les collisions')
+<<<<<<< HEAD
     await asyncio.to_thread(world.require_hardware_ready)
+=======
+    world.require_hardware_ready()
+>>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
     # Validate every quantized setpoint BEFORE any write.
     goals = [joints_to_ticks(c, s['q_rad']) for s in plan['samples']]
     for goal in goals:
@@ -92,10 +106,15 @@ async def execute(station, arm, plan, progress=None, paced=False, command_period
     for sample, goal in zip(quantized['samples'], goals):
         sample['q_rad'] = ticks_to_joints(c, goal).tolist()
     await asyncio.to_thread(world.validate_plan, quantized)
+<<<<<<< HEAD
     await asyncio.to_thread(world.require_hardware_ready)
     await fresh_feedback(station)
     actual = measured(station, c, powered=True, stationary=True)
     progress('Checking that the real arm still matches the simulation start')
+=======
+    world.require_hardware_ready()
+    actual = measured(station, c, powered=True, stationary=True)
+>>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
     previous = np.asarray(plan['samples'][0]['q_rad'])
     if np.max(np.abs(actual-previous)) > 0.02:
         raise RuntimeError('Le bras a bougé pendant le calcul ; recalculer le plan')
@@ -107,6 +126,7 @@ async def execute(station, arm, plan, progress=None, paced=False, command_period
     await station.write(0x2e, [c['servo_speed_ticks_s']]*7, 2)
     await station.write(0x29, [c['servo_acceleration']]*7, 1)
     begin = time.monotonic()
+<<<<<<< HEAD
     progress('Sending trajectory to real arm')
     commands = list(zip(plan['samples'], goals))
     if command_period is not None and not .02 <= command_period <= .1:
@@ -153,6 +173,15 @@ async def execute(station, arm, plan, progress=None, paced=False, command_period
             actual = latest
         else:
             world.require_pose(actual, 'Position mesurée')
+=======
+    for sample, goal in zip(plan['samples'], goals):
+        deadline = begin+sample['t_s']
+        await asyncio.sleep(max(0, deadline-time.monotonic()))
+        if time.monotonic()-deadline > 0.1:
+            raise RuntimeError('Boucle de commande en retard ; arrêt de l’envoi')
+        actual = measured(station, c, powered=True)
+        world.require_pose(actual, 'Position mesurée')
+>>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
         if np.max(np.abs(actual-previous)) > c['tracking_error_rad']:
             raise RuntimeError('Erreur de suivi excessive ; arrêt de l’envoi')
         await station.write(0x2a, goal, 2)
@@ -160,7 +189,10 @@ async def execute(station, arm, plan, progress=None, paced=False, command_period
     # Check real arrival rather than declaring success after the last send.
     final = np.asarray(plan['samples'][-1]['q_rad'])
     timeout = time.monotonic()+3
+<<<<<<< HEAD
     progress('Verifying final arrival')
+=======
+>>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
     while time.monotonic() < timeout:
         q = measured(station, c, powered=True)
         if np.max(np.abs(q-final)) > c['tracking_error_rad']:

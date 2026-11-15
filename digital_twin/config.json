@@ -1,0 +1,212 @@
+{
+  "profile": "nominal_unmeasured",
+  "hardware_verified": false,
+  "timestep_s": 0.002,
+  "control_period_s": 0.05,
+  "wheel_radius_m": 0.05,
+  "base_radius_m": 0.125,
+  "wheel_mount_deg": [
+    240,
+    0,
+    120
+  ],
+  "wheel_speed_rad_s": 4.6,
+  "wheel_torque_nm": 1.0,
+  "roller_count": 16,
+  "base_mass_kg": 2.0,
+  "base_height_m": 0.07,
+  "arm_mount_xyz_m": [
+    0,
+    0.04,
+    0.07
+  ],
+  "cad_xyz_m": [
+    0.02,
+    -0.06,
+    0.04
+  ],
+  "cad_rpy_rad": [
+    0,
+    0,
+    1.5707963267948966
+  ],
+  "tcp_xyz_m": [
+    0,
+    0.1,
+    0
+  ],
+  "letter_center_from_tcp_m": [
+    0,
+    0.055,
+    0
+  ],
+  "pickup_joint_rad": [
+    -0.98961,
+    -1.47098,
+    -0.97353,
+    1.22687,
+    0.45522,
+    1.65712,
+    -2.0857
+  ],
+  "arm_velocity_rad_s": 0.15,
+  "joint_limit_margin_rad": 0.03,
+  "linear_ik_regularization": 0.002,
+  "lidar": {
+    "virtual_only": true,
+    "rays": 181,
+    "max_range_m": 5.0,
+    "noise_std_m": 0.003,
+    "period_s": 0.1,
+    "xyz_m": [
+      0,
+      0,
+      0.16
+    ]
+  },
+  "odometry": {
+    "wheel_scale": [
+      1.005,
+      0.995,
+      1.003
+    ],
+    "noise_std_rad": 0.0001
+  },
+  "map": {
+    "resolution_m": 0.04,
+    "size_m": [
+      5,
+      4
+    ],
+    "origin_m": [
+      -0.5,
+      -0.5
+    ]
+  },
+  "navigation": {
+    "max_speed_m_s": 0.2,
+    "max_yaw_rad_s": 0.5,
+    "footprint_radius_m": 0.3,
+    "goal_tolerance_m": 0.045,
+    "yaw_tolerance_rad": 0.06
+  },
+  "room_size_m": [
+    3.6,
+    2.9
+  ],
+  "start_pose": [
+    0.6,
+    1.45,
+    0
+  ],
+  "obstacles": [],
+  "mailboxes": [
+    {
+      "name": "north_0",
+      "front_xyz_m": [
+        1.0,
+        2.1,
+        0.36
+      ],
+      "approach_pose": [
+        1.0,
+        1.72,
+        0
+      ],
+      "yaw_rad": 0,
+      "slot_width_m": 0.2,
+      "slot_height_m": 0.06,
+      "depth_m": 0.18
+    },
+    {
+      "name": "north_1",
+      "front_xyz_m": [
+        1.8,
+        2.1,
+        0.36
+      ],
+      "approach_pose": [
+        1.8,
+        1.72,
+        0
+      ],
+      "yaw_rad": 0,
+      "slot_width_m": 0.2,
+      "slot_height_m": 0.06,
+      "depth_m": 0.18
+    },
+    {
+      "name": "north_2",
+      "front_xyz_m": [
+        2.6,
+        2.1,
+        0.36
+      ],
+      "approach_pose": [
+        2.6,
+        1.72,
+        0
+      ],
+      "yaw_rad": 0,
+      "slot_width_m": 0.2,
+      "slot_height_m": 0.06,
+      "depth_m": 0.18
+    },
+    {
+      "name": "south_0",
+      "front_xyz_m": [
+        1.0,
+        0.8,
+        0.36
+      ],
+      "approach_pose": [
+        1.0,
+        1.18,
+        3.141592653589793
+      ],
+      "yaw_rad": 3.141592653589793,
+      "slot_width_m": 0.2,
+      "slot_height_m": 0.06,
+      "depth_m": 0.18
+    },
+    {
+      "name": "south_1",
+      "front_xyz_m": [
+        1.8,
+        0.8,
+        0.36
+      ],
+      "approach_pose": [
+        1.8,
+        1.18,
+        3.141592653589793
+      ],
+      "yaw_rad": 3.141592653589793,
+      "slot_width_m": 0.2,
+      "slot_height_m": 0.06,
+      "depth_m": 0.18
+    },
+    {
+      "name": "south_2",
+      "front_xyz_m": [
+        2.6,
+        0.8,
+        0.36
+      ],
+      "approach_pose": [
+        2.6,
+        1.18,
+        3.141592653589793
+      ],
+      "yaw_rad": 3.141592653589793,
+      "slot_width_m": 0.2,
+      "slot_height_m": 0.06,
+      "depth_m": 0.18
+    }
+  ],
+  "letters": [],
+  "task": {
+    "state_timeout_s": 90,
+    "max_time_s": 360
+  }
+}

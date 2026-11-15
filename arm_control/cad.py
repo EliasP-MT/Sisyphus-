@@ -14,7 +14,11 @@ def sha256(path):
 def read_solids(source):
     from OCP.IFSelect import IFSelect_RetDone
     from OCP.STEPControl import STEPControl_Reader
+<<<<<<< HEAD
     from OCP.TopAbs import TopAbs_SOLID, TopAbs_SHELL
+=======
+    from OCP.TopAbs import TopAbs_SOLID
+>>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
     from OCP.TopExp import TopExp_Explorer
     from OCP.TopoDS import TopoDS
     reader = STEPControl_Reader()
@@ -23,6 +27,7 @@ def read_solids(source):
     reader.SetSystemLengthUnit(1.0)
     if reader.TransferRoots() < 1:
         raise ValueError('STEP sans géométrie transférable')
+<<<<<<< HEAD
     shape = reader.OneShape()
     # Some CAD exporters represent most assembly parts as open/triangle shells.
     # Silently extracting only solids would omit those collision obstacles.
@@ -31,6 +36,10 @@ def read_solids(source):
         raise ValueError('STEP contains surface shells outside closed solids; solid-only conversion would omit assembly geometry. Surface-aware import required.')
     solids = []
     explorer = TopExp_Explorer(shape, TopAbs_SOLID)
+=======
+    solids = []
+    explorer = TopExp_Explorer(reader.OneShape(), TopAbs_SOLID)
+>>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
     while explorer.More():
         solids.append(TopoDS.Solid_s(explorer.Current()))
         explorer.Next()

@@ -1,0 +1,27 @@
+<% require 'shellwords' %>
+<% root = ENV.fetch('HACKATHON_ROOT') %>
+name: humanoid-hackathon
+root: <%= root.inspect %>
+startup_window: pilotage
+windows:
+  - pilotage:
+      layout: main-vertical
+      panes:
+        - <%= (root + '/scripts/hackathon').shellescape %> agent pilotage
+        - # Terminal libre : commandes manuelles
+  - robot:
+      panes:
+        - <%= (root + '/scripts/hackathon').shellescape %> agent robot
+  - donnees:
+      panes:
+        - <%= (root + '/scripts/hackathon').shellescape %> agent donnees
+  - integration:
+      panes:
+        - <%= (root + '/scripts/hackathon').shellescape %> agent integration
+  - git:
+      root: <%= (root + '/.hackathon/worktrees/integration').inspect %>
+      panes:
+        - lazygit
+  - commandes:
+      panes:
+        - # Shell entièrement libre dans le dépôt principal
