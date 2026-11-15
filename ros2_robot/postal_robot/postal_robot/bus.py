@@ -15,11 +15,12 @@ class BusError(RuntimeError):
 
 
 class Bus:
-    def __init__(self, device, writable_ids, timeout=.02, baudrate=1000000, transport=None):
+    def __init__(self, device, writable_ids, timeout=.02, write_timeout=.1, baudrate=1000000,
+                 transport=None):
         if transport is None:
             import serial
             transport = serial.Serial(device, baudrate, timeout=timeout,
-                                      write_timeout=timeout, exclusive=True)
+                                      write_timeout=write_timeout, exclusive=True)
         self.serial = transport
         self.writable_ids = frozenset(writable_ids)
         if st3215.BROADCAST_ID in self.writable_ids or not all(1 <= i <= 253 for i in self.writable_ids):
@@ -29,7 +30,13 @@ class Bus:
 
     def _transact(self, frame, reply_size, motor_id):
         self.serial.reset_input_buffer()
-        self.serial.write(frame)
+        try:
+            self.serial.write(frame)
+        except Exception as exc:
+            # A USB scheduling hiccup is a failed transaction, not a lost device.
+            if type(exc).__name__ == 'SerialTimeoutException':
+                raise BusError(f'ID {motor_id}: serial write timeout') from exc
+            raise
         if reply_size is None:
             return None, 0
         raw = self.serial.read(reply_size + 6)

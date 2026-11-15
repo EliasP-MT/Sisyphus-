@@ -8,6 +8,9 @@ Conflicts=rdk-station.service arm-view.service
 [Service]
 Type=simple
 EnvironmentFile=%h/postal_config/ros.env
+Environment=FASTRTPS_DEFAULT_PROFILES_FILE=%h/postal_config/fastdds_robot.xml
+# DDS restricted to Wi-Fi + loopback + shared memory (operational link = Wi-Fi).
+ExecStartPre=/bin/bash %h/postal_config/robot_dds_profile.sh
 ExecStart=/bin/bash -c 'source /opt/ros/humble/setup.bash && source %h/postal_ws/install/setup.bash && exec ros2 launch postal_robot robot.launch.py'
 Restart=on-failure
 RestartSec=3

@@ -39,22 +39,31 @@ class Planner:
         self.world = CollisionWorld(URDF, self.arm, self.scene_path)
         self.arm.collision = self.world
         self.lock = threading.Lock()
+        self.ready_cache, self.ready_time = None, 0.
+
+    def readiness(self):
+        """Scene readiness (hashes every geometry file): cached 20 s for /status.
+        Plans always re-run require_hardware_ready themselves."""
+        if self.ready_cache is None or time.monotonic() - self.ready_time > 20:
+            with self.lock:
+                try:
+                    self.world.require_hardware_ready()
+                    self.ready_cache = (True, 'Scene, registration and geometry fingerprints verified')
+                except ValueError as exc:
+                    self.ready_cache = (False, str(exc))
+                self.ready_time = time.monotonic()
+        return self.ready_cache
 
     def status(self):
-        with self.lock:
-            try:
-                self.world.require_hardware_ready()
-                ready, reason = True, 'Scene, registration and geometry fingerprints verified'
-            except ValueError as exc:
-                ready, reason = False, str(exc)
-            s = self.world.scene
-            return dict(scene=str(self.scene_path), scene_sha256=self.world.fingerprint,
-                        calibration=str(self.calibration_path), calibration_sha256=self.calibration_sha,
-                        hardware_ready=ready, reason=reason, margin_m=s['margin_m'],
-                        self_margin_m=s['self_margin_m'], edge_step_rad=s['edge_step_rad'],
-                        gripper_angle_rad=s['gripper_angle_rad'], planning_time_s=s['planning_time_s'],
-                        registration=s.get('registration', {}).get('method', ''),
-                        max_velocity_rad_s=self.config['max_velocity_rad_s'])
+        ready, reason = self.readiness()
+        s = self.world.scene
+        return dict(scene=str(self.scene_path), scene_sha256=self.world.fingerprint,
+                    calibration=str(self.calibration_path), calibration_sha256=self.calibration_sha,
+                    hardware_ready=ready, reason=reason, margin_m=s['margin_m'],
+                    self_margin_m=s['self_margin_m'], edge_step_rad=s['edge_step_rad'],
+                    gripper_angle_rad=s['gripper_angle_rad'], planning_time_s=s['planning_time_s'],
+                    registration=s.get('registration', {}).get('method', ''),
+                    max_velocity_rad_s=self.config['max_velocity_rad_s'])
 
     def _check_ticks(self, ticks, label):
         if len(ticks) != 7 or any(type(t) is not int for t in ticks):
@@ -86,6 +95,7 @@ class Planner:
             for row in quantized['samples']:
                 row['q_rad'] = ticks_to_joints(c, joints_to_ticks(c, row['q_rad'])).tolist()
             world.validate_plan(quantized)  # what the servos will actually be asked to do
+            compensation, note = self._compensation_box(end)
             reasons = []
             try:
                 world.require_hardware_ready()
@@ -96,7 +106,31 @@ class Planner:
                         duration_s=float(rows[-1]['t_s']), collision_scene_sha256=world.fingerprint,
                         calibration_sha256=self.calibration_sha, waypoints=len(path),
                         reasons=reasons, executable=not reasons,
+                        compensation_limit_rad=compensation, compensation_note=note,
                         planning_s=time.monotonic() - begin, collision_checks=world.checks)
+
+    def _compensation_box(self, final, joints=(1, 2, 3), limit=.06):
+        """Validate the static-error compensation box around the final pose.
+
+        Every grid point of final +/- limit on the gravity-loaded joints
+        (J2, J3, J4), and the straight motion from the final pose to it, must be
+        within calibration and collision-free; otherwise no compensation."""
+        import itertools
+        import numpy as np
+        for deltas in itertools.product((-limit, 0., limit), repeat=len(joints)):
+            q = np.array(final, dtype=float)
+            for j, d in zip(joints, deltas):
+                q[j] += d
+            try:
+                joints_to_ticks(self.config, self.arm.check(q))
+            except ValueError as exc:
+                return [0.] * 7, f'compensation unavailable ({exc})'
+            if not self.world.motion_valid(final, q):
+                return [0.] * 7, 'compensation unavailable (box around the target is not collision-free)'
+        bounds = [0.] * 7
+        for j in joints:
+            bounds[j] = limit
+        return bounds, f'static-error compensation up to {limit} rad validated on J2-J4'
 
     def check(self, ticks):
         """Collision check of a MEASURED pose (execution monitor)."""

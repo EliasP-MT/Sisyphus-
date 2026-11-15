@@ -40,6 +40,7 @@ if ! ssh "$RDK_HOST" test -e postal_config/poses.local.json && [[ -f $POSES ]]; 
 fi
 ssh "$RDK_HOST" 'test -e postal_config/ros.env || printf "ROS_DOMAIN_ID=43\nRMW_IMPLEMENTATION=rmw_fastrtps_cpp\nPYTHONUNBUFFERED=1\n" > postal_config/ros.env'
 scp -q "$HERE/deploy/postal-robot.service" "$RDK_HOST:.config/systemd/user/postal-robot.service"
+scp -q "$HERE/deploy/robot_dds_profile.sh" "$HERE/deploy/fastdds_robot.xml.in" "$RDK_HOST:postal_config/"
 ssh "$RDK_HOST" 'set -e; source /opt/ros/humble/setup.bash; cd postal_ws
   colcon build --packages-select postal_robot_interfaces postal_robot --event-handlers console_cohesion- 2>&1 | tail -5
   systemctl --user daemon-reload'

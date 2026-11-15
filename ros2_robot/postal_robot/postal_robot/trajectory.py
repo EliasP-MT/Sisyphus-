@@ -20,8 +20,9 @@ class TrajectoryError(ValueError):
 
 class TrajectoryRun:
     def __init__(self, calibration, names, times, points, *, start_tolerance=.02,
-                 arrival_tolerance=.01, arrival_timeout=5., max_step_gap=.25,
-                 velocity_margin=1.25):
+                 arrival_tolerance=.01, arrival_timeout=8., max_step_gap=.25,
+                 velocity_margin=1.25, compensation=None, settle_time=.4, settle_rad=.003,
+                 max_compensation_steps=5):
         if tuple(names) != JOINTS:
             raise TrajectoryError('Trajectory must list rev_motor_01..07 in order')
         if len(times) < 2 or len(times) != len(points) or len(times) > 100000:
@@ -47,6 +48,12 @@ class TrajectoryRun:
         self.calibration, self.times, self.points, self.goals = calibration, list(times), points, goals
         self.start_tolerance, self.arrival_tolerance = start_tolerance, arrival_tolerance
         self.arrival_timeout, self.max_step_gap = arrival_timeout, max_step_gap
+        compensation = list(compensation or [0.] * 7)
+        if len(compensation) != 7 or any(not (math.isfinite(c) and 0 <= c <= .1) for c in compensation):
+            raise TrajectoryError('compensation limits: seven values within 0..0.1 rad')
+        self.compensation, self.offset = compensation, [0.] * 7
+        self.settle_time, self.settle_rad, self.max_steps = settle_time, settle_rad, max_compensation_steps
+        self.steps, self.settled_ref, self.last_motion = 0, None, None
         self.state, self.message = RUNNING, ''
         self.start_time = self.last_step = None
         self.commanded = -1
@@ -74,7 +81,7 @@ class TrajectoryRun:
         if now - self.last_step > self.max_step_gap:
             return self._abort(f'Control loop late by {now - self.last_step:.3f} s; motion stopped')
         self.last_step = now
-        reference = self.points[max(self.commanded, 0)]
+        reference = self.points[max(self.commanded, 0)]  # planned pose, not the offset goal
         error = max(abs(a - b) for a, b in zip(measured, reference))
         self.max_tracking = max(self.max_tracking, error)
         if error > self.tracking_error:
@@ -92,13 +99,41 @@ class TrajectoryRun:
         return self.goals[index]
 
     def _arrival(self, now, measured):
+        """Measured arrival; optional bounded compensation of the servo static error.
+
+        Once the arm has settled, the final goal is shifted by the remaining error
+        (gravity sag of a proportional servo), never beyond the per-joint bound
+        validated collision-free by the planner. The physical target stays the
+        planned final pose; only the commanded goal is offset."""
         final = self.points[-1]
-        error = max(abs(a - b) for a, b in zip(measured, final))
+        errors = [b - a for a, b in zip(measured, final)]
+        error = max(abs(e) for e in errors)
+        used = max(abs(o) for o in self.offset)
         if error <= self.arrival_tolerance:
-            self.state, self.message = SUCCEEDED, f'Arrived (max joint error {error:.4f} rad)'
-        elif now - self.start_time > self.duration + self.arrival_timeout:
-            self._abort(f'Final position not reached: error {error:.4f} rad after timeout')
-        return None
+            self.state = SUCCEEDED
+            self.message = f'Arrived (max joint error {error:.4f} rad' + (
+                f', static-error compensation {used:.3f} rad in {self.steps} step(s))' if self.steps else ')')
+            return None
+        if now - self.start_time > self.duration + self.arrival_timeout:
+            return self._abort(f'Final position not reached: error {error:.4f} rad after timeout'
+                               + (f' (compensation {used:.3f} rad)' if self.steps else ''))
+        if self.settled_ref is None or max(abs(a - b) for a, b in zip(measured, self.settled_ref)) > self.settle_rad:
+            self.settled_ref, self.last_motion = list(measured), now
+            return None
+        if now - self.last_motion < self.settle_time or not any(self.compensation):
+            return None
+        if self.steps >= self.max_steps:
+            return self._abort(f'Final position not reached after {self.steps} compensation steps: error {error:.4f} rad')
+        offset = [max(-c, min(c, o + e)) if c > 0 and abs(e) > self.arrival_tolerance / 2 else o
+                  for o, e, c in zip(self.offset, errors, self.compensation)]
+        if offset == self.offset:
+            return self._abort(f'Static error {error:.4f} rad exceeds the validated compensation bound')
+        try:
+            goal = [self.calibration.to_ticks(n, q + o) for n, q, o in zip(JOINTS, final, offset)]
+        except CalibrationError as exc:
+            return self._abort(f'Compensated goal refused: {exc}')
+        self.offset, self.steps, self.last_motion = offset, self.steps + 1, now
+        return goal
 
     def _abort(self, message):
         self.state, self.message = ABORTED, message

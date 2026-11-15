@@ -10,7 +10,7 @@
     lease_timeout_s: 0.8
     wheel_ids: [11, 12, 9]          # left, back, right (never the old 7/8 IDs)
     wheel_signs: [1, 1, 1]          # LeKiwi convention; verify on hardware
-    base_direction_verified: false  # true only after the lifted-wheel test
+    base_direction_verified: true   # 2026-11-15: CCW rotation and forward (away from wheel 12) confirmed on the ground by the operator
     wheel_radius_m: 0.05
     base_radius_m: 0.125
     wheel_mount_deg: [240.0, 0.0, 120.0]
@@ -18,6 +18,7 @@
     max_linear_m_s: 0.15
     max_angular_rad_s: 0.6
     cmd_timeout_s: 0.3
+    wheel_stop_speed_raw: 60        # speed feedback resolution is 50 ticks/s
     dispenser_id: 10
     dispenser_default_speed: -1000
     dispenser_max_duration_s: 10.0
@@ -27,7 +28,8 @@
     gripper_speed_ticks_s: 200
     start_tolerance_rad: 0.02
     arrival_tolerance_rad: 0.01
-    arrival_timeout_s: 5.0
+    arrival_timeout_s: 8.0
+    max_compensation_rad: 0.06      # robot-side cap of the static-error compensation
     publish_odom_tf: false          # the navigation merge decides who owns odom TF
 /robot/camera_1/camera:
   ros__parameters:

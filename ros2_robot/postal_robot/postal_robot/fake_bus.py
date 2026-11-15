@@ -75,6 +75,8 @@ class FakeTransport:
             elif instruction == st3215.INST_WRITE:
                 address = params[0]
                 servo.mem[address:address + len(params) - 1] = params[1:]
+                if address in (st3215.GOAL_POSITION, st3215.GOAL_SPEED):
+                    servo.mem[st3215.TORQUE_ENABLE] = 1  # as the real ST3215: a goal write energizes
                 payload = b''
             else:
                 return
