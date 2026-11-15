@@ -13,7 +13,8 @@ Environment=FASTRTPS_DEFAULT_PROFILES_FILE=%h/postal_config/fastdds_robot.xml
 ExecStartPre=/bin/bash %h/postal_config/robot_dds_profile.sh
 ExecStart=/bin/bash -c 'source /opt/ros/humble/setup.bash && source %h/postal_ws/install/setup.bash && exec ros2 launch postal_robot robot.launch.py'
 Restart=on-failure
-RestartSec=3
+RestartSec=5
+StartLimitIntervalSec=0
 KillSignal=SIGINT
 TimeoutStopSec=15
 

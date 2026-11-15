@@ -16,7 +16,10 @@ if [ -n "$IP" ]; then
 $LIST"
   echo "postal DDS: Wi-Fi $IFACE $IP + loopback"
 else
-  echo "postal DDS: WARNING no address on $IFACE; station unreachable until restart" >&2
+  # Never start deaf: without the Wi-Fi address the station could not reach the
+  # robot. Failing makes systemd retry (Restart=on-failure) until Wi-Fi is up.
+  echo "postal DDS: no address on $IFACE after 60 s; refusing to start" >&2
+  exit 1
 fi
 awk -v list="$LIST" '{ if ($0 == "@WHITELIST@") print list; else print }' \
   "$DIR/fastdds_robot.xml.in" > "$DIR/fastdds_robot.xml"
