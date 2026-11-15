@@ -48,6 +48,13 @@ class TrajectoryRun:
             if max(abs(b - a) for a, b in zip(points[i - 1], points[i])) > vmax * dt + 1e-9:
                 raise TrajectoryError(f'Point {i}: velocity above {max_speed_factor:g}x the calibrated limit')
         self.calibration, self.times, self.points, self.goals = calibration, list(times), points, goals
+        # Speed of this plan relative to the calibrated velocity. Servo lag grows
+        # with speed, so the tracking bound grows with it, at half rate
+        # (1x -> base bound, 2x -> 1.5x the base bound), never faster.
+        peak = max((max(abs(b - a) for a, b in zip(points[i - 1], points[i])) / (times[i] - times[i - 1])
+                    for i in range(1, len(points))), default=0.)
+        self.speed_ratio = max(1., peak / c['max_velocity_rad_s']) if c.get('max_velocity_rad_s') else 1.
+        self.tracking_error *= 1 + .5 * (self.speed_ratio - 1)
         self.start_tolerance, self.arrival_tolerance = start_tolerance, arrival_tolerance
         self.arrival_timeout, self.max_step_gap = arrival_timeout, max_step_gap
         compensation = list(compensation or [0.] * 7)

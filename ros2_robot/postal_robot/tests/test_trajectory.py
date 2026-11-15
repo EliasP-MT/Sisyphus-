@@ -142,3 +142,15 @@ class SpeedFactorTests(unittest.TestCase):
         times, points = plan(c, steps=5, dt=.1, delta=.05)  # 0.5 rad/s > 2x ceiling
         with self.assertRaises(TrajectoryError):
             TrajectoryRun(c, JOINTS, times, points, max_speed_factor=2.)
+
+
+class TrackingScalingTests(unittest.TestCase):
+    def test_tracking_bound_grows_half_as_fast_as_speed(self):
+        c = calibration()
+        slow = TrajectoryRun(c, JOINTS, *plan(c, steps=5, dt=.1, delta=.01))      # 0.1 rad/s < calibrated
+        fast = TrajectoryRun(c, JOINTS, *plan(c, steps=5, dt=.1, delta=.02), max_speed_factor=2.)
+        self.assertEqual(slow.speed_ratio, 1.)
+        self.assertAlmostEqual(slow.tracking_error, .1)
+        self.assertAlmostEqual(fast.speed_ratio, 2. / .1457 * .1, delta=.01)   # ~1.37x
+        self.assertAlmostEqual(fast.tracking_error, .1 * (1 + .5 * (fast.speed_ratio - 1)))
+        self.assertLess(fast.tracking_error, .1 * fast.speed_ratio)
