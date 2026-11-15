@@ -833,11 +833,12 @@ class Core(Node):
                     raise RuntimeError('Fresh arm feedback unavailable')
                 c = self.calibration.data
                 base, cap = c['servo_speed_ticks_s'], c['servo_speed_ticks_s'] * self.cfg['max_speed_factor']
+                accel = int(min(254, math.ceil(c['servo_acceleration'] * run.speed_ratio ** 2)))
                 for i, peak in zip(range(1, 8), run.peak_ticks_per_s()):
                     # Servo speed follows the plan (25 % headroom), never below the
                     # calibrated speed nor above the configured ceiling.
                     self._write(i, st3215.GOAL_SPEED, int(min(cap, max(base, math.ceil(peak * 1.25)))))
-                    self._write(i, st3215.ACCELERATION, c['servo_acceleration'])
+                    self._write(i, st3215.ACCELERATION, accel)  # lag shrinks with acceleration
                 run.begin(measured, time.monotonic())
                 self.run, self.run_plan = run, goal.plan_id
             self.submit(start)
