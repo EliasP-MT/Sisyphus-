@@ -23,6 +23,14 @@ echo "Station DDS on $DEV ($PC_IP) -> robot $ROBOT_WIFI_IP, domain ${ROS_DOMAIN_
 "$REPO/arm_control/.venv/bin/python" "$HERE/postal_station/planner_worker/worker.py" \
   --calibration "$CALIBRATION" --scene "$SCENE" > "$HERE/.station_ws/planner.log" 2>&1 &
 WORKER=$!
-trap 'kill $WORKER 2>/dev/null || true' EXIT
+OCR_PY=$REPO/base_ocr/.venv/bin/python
+OCR=""
+if [[ -x $OCR_PY ]]; then
+  "$OCR_PY" "$HERE/postal_station/ocr_worker/worker.py" > "$HERE/.station_ws/ocr.log" 2>&1 &
+  OCR=$!
+else
+  echo "WARNING: base_ocr/.venv missing: card OCR disabled (python3 -m venv base_ocr/.venv && base_ocr/.venv/bin/pip install -r base_ocr/requirements.txt)" >&2
+fi
+trap 'kill $WORKER $OCR 2>/dev/null || true' EXIT
 xhost +local: >/dev/null 2>&1 || true
 STATION_DDS_PROFILE=$PROFILE bash "$HERE/deploy/station_docker.sh" ros2 launch postal_station station.launch.py "$@"

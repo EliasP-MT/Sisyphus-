@@ -46,7 +46,12 @@ progress{width:100%}.banner{padding:8px 10px;border-radius:6px;margin:4px 0}.ban
     Speed <input type="number" id="taskSpeedIn" value="1" min="0.1" max="2" step="0.1" style="width:5em">×
     <button id="taskPlan">Plan</button>
     <button id="taskStart" class="primary" disabled>Start task</button>
-    <button id="taskStop" class="danger">Stop</button></div>
+    <button id="taskStop" class="danger">Stop</button>
+    <span class="muted">OCR camera</span> <select id="ocrCam"><option value="1" selected>1</option><option value="2">2</option></select>
+    <button id="ocrNow">Read card now</button></div>
+  <div id="ocrBox" class="row" hidden>
+    <img id="ocrImg" alt="frame read" style="height:90px;border-radius:6px;border:1px solid var(--line)">
+    <div><div class="muted">Name read on the card</div><div id="ocrName" style="font-size:22px;font-weight:700"></div><div id="ocrInfo" class="muted"></div></div></div>
   <div id="taskMsg" class="muted"></div>
   <ol id="taskSteps" style="margin:6px 0;padding-left:22px"></ol>
   <div class="muted">Plan covers the whole sequence before anything moves (first leg from the current pose, the others between stored poses). Start only runs the precomputed plans; any failure stops the dispenser and holds the arm.</div>
@@ -199,6 +204,7 @@ function render() {
 }
 function renderTask(t) {
   if (!t) return;
+  renderOcr(t.ocr);
   const sel = $('taskSel');
   if (!sel.options.length) for (const [k, v] of Object.entries(t.tasks)) sel.add(new Option(v, k));
   const cls = {ok: 'ok', failed: 'bad', running: 'warn', planning: 'warn'};
@@ -212,6 +218,15 @@ function renderTask(t) {
   $('taskPlan').textContent = t.phase === 'failed' || t.phase === 'canceled' ? 'Retry plan' : 'Plan';
   $('taskSpeedIn').disabled = busy;
   $('taskStart').disabled = t.phase !== 'ready';
+}
+let ocrFrame = 0;
+function renderOcr(o) {
+  $('ocrBox').hidden = !o;
+  if (!o) return;
+  $('ocrName').textContent = o.success ? (o.name || '— no known name read —') : 'OCR failed';
+  $('ocrName').className = o.success && o.name ? 'ok' : 'bad';
+  $('ocrInfo').textContent = (o.success ? `camera ${o.camera}, ${o.seconds} s` : o.message) + ' · ' + new Date(o.time * 1000).toLocaleTimeString();
+  if (o.frame_id && o.frame_id !== ocrFrame) { ocrFrame = o.frame_id; $('ocrImg').src = `/ocr_frame.jpg?token=${encodeURIComponent(TOKEN)}&t=${o.frame_id}`; }
 }
 function renderPlan() {
   const st = $('planBox').dataset.status || '';
@@ -240,7 +255,8 @@ async function loadPoses() {
   for (const r of document.querySelectorAll('input[name=pose]')) r.onchange = () => { selected = r.value; plan = null; renderPlan(); };
 }
 
-$('taskPlan').onclick = () => act('/api/task/plan', {task: $('taskSel').value, speed_factor: parseFloat($('taskSpeedIn').value) || 1}, 'task plan');
+$('taskPlan').onclick = () => act('/api/task/plan', {task: $('taskSel').value, speed_factor: parseFloat($('taskSpeedIn').value) || 1, ocr_camera: parseInt($('ocrCam').value)}, 'task plan');
+$('ocrNow').onclick = () => act('/api/task/ocr', {camera: parseInt($('ocrCam').value)}, 'read card', 130000);
 $('taskStart').onclick = () => act('/api/task/start', {}, 'task start');
 $('taskStop').onclick = () => act('/api/task/stop', {}, 'task stop');
 $('ack').onclick = () => act('/api/ack', {}, 'acknowledge');
