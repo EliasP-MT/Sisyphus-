@@ -1,0 +1,85 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded: ~
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 0.1
+      Plane Cell Count: 20
+      Reference Frame: <Fixed Frame>
+    - Class: rviz_default_plugins/RobotModel
+      Name: Measured arm (hardware)
+      Enabled: true
+      Description Source: Topic
+      Description Topic:
+        Value: /robot/robot_description
+        Durability Policy: Transient Local
+      TF Prefix: ""
+      Alpha: 1
+      Visual Enabled: true
+      Collision Enabled: false
+    - Class: rviz_default_plugins/RobotModel
+      Name: Planned motion (preview)
+      Enabled: true
+      Description Source: Topic
+      Description Topic:
+        Value: /station/preview/robot_description
+        Durability Policy: Transient Local
+      TF Prefix: preview
+      Alpha: 0.35
+      Visual Enabled: true
+      Collision Enabled: false
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: true
+      Show Names: false
+      Show Axes: true
+      Marker Scale: 0.15
+      Frame Timeout: 5
+    - Class: rviz_default_plugins/Image
+      Name: Camera 1
+      Enabled: true
+      Topic:
+        Value: /robot/camera_1/image
+        Reliability Policy: Best Effort
+      Transport Hint: compressed
+    - Class: rviz_default_plugins/Image
+      Name: Camera 2
+      Enabled: true
+      Topic:
+        Value: /robot/camera_2/image
+        Reliability Policy: Best Effort
+      Transport Hint: compressed
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: base_link
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 0.9
+      Focal Point:
+        X: 0
+        Y: 0.1
+        Z: 0.15
+      Pitch: 0.5
+      Yaw: 0.8
+      Name: Current View
+      Target Frame: <Fixed Frame>
+    Saved: ~
+Window Geometry:
+  Height: 900
+  Width: 1400
