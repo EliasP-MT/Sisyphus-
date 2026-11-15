@@ -1,2 +1,9 @@
 # Local runtime data, including the station encryption seed.
 /station/station_data/
+/station/.cache/
+__pycache__/
+*.py[cod]
+# Local rover artifacts retained when switching from the rover branch.
+/calibration-images/
+/models/
+/config/

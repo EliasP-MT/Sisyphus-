@@ -1,0 +1,17 @@
+# RDK X5: servo control through the existing USB adapter.
+# Cameras remain owned by the ROS camera nodes.
+drivers:
+  st3215:
+    enabled: true
+    current-threshold: 100
+    deadband: 20
+  vesc-trampa:
+    enabled: false
+    port-baud-rate: 115200
+  system-info: true
+  usb-video:
+    enabled: false
+    resize_target: 224
+    formats: []
+    frame-skip: 0
+inference: []
