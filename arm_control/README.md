@@ -73,6 +73,13 @@ seul une insertion. Les coordonnées caméra ou monde doivent d’abord être
 transformées vers `base_link` avec une calibration extrinsèque ; la navigation
 Kiwi et cette transformation ne sont pas implémentées ici.
 
+## Mise au point sur le robot
+
+L’outil `commission.py` ajoute la découverte des bus, les captures de référence,
+le calcul de calibration/TCP et des petits essais moteur ou XYZ. Suivre le
+[protocole de mise au point](COMMISSIONING.md), qui détaille aussi les fichiers
+CAD et mesures nécessaires à l’évitement des collisions.
+
 ## Préparation au matériel
 
 Copier `elrobot.example.json` vers `arm_control/elrobot.local.json` (ignoré par Git).
