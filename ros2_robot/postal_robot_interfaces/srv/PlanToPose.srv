@@ -1,4 +1,8 @@
 string pose_name
+string start_pose_name         # empty = start from the measured arm pose; else plan from that stored pose (task legs)
+float64 valid_for_s           # 0 = default plan lifetime
+float64 arrival_tolerance_rad  # 0 = default; see ExecuteTrajectory
+float64 start_tolerance_rad
 float64 speed_factor        # scales calibrated velocity/acceleration/jerk; 0 = 1.0
 ---
 bool success

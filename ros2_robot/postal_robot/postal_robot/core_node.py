@@ -93,7 +93,7 @@ class Core(Node):
         p('gripper_speed_ticks_s', 200)
         p('start_tolerance_rad', .02)
         p('arrival_tolerance_rad', .01)
-        p('arrival_timeout_s', 8.)
+        p('arrival_timeout_s', 20.)
         p('max_compensation_rad', .06)
         p('max_speed_factor', 2.)
         p('stationary_speed_ticks_s', 10)
@@ -809,8 +809,10 @@ class Core(Node):
             times = [p.time_from_start.sec + p.time_from_start.nanosec * 1e-9 for p in points]
             run = TrajectoryRun(self.calibration, goal.trajectory.joint_names, times,
                                 [list(p.positions) for p in points],
-                                start_tolerance=self.cfg['start_tolerance_rad'],
-                                arrival_tolerance=self.cfg['arrival_tolerance_rad'],
+                                start_tolerance=max(self.cfg['start_tolerance_rad'],
+                                                    min(goal.start_tolerance_rad, .08)),
+                                arrival_tolerance=max(self.cfg['arrival_tolerance_rad'],
+                                                      min(goal.arrival_tolerance_rad, .08)),
                                 arrival_timeout=self.cfg['arrival_timeout_s'],
                                 max_step_gap=max(.25, 4 * self.period),
                                 max_speed_factor=self.cfg['max_speed_factor'],

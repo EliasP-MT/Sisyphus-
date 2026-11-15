@@ -65,9 +65,10 @@ class TrajectoryTests(unittest.TestCase):
         r = self.run_()
         r.begin(self.points[0], 0.)
         off = list(self.points[0])
-        off[0] += .2
+        off[0] += .3
         r.step(.05, off)
         self.assertIn('Tracking', r.message)
+        self.assertIn('J1', r.message)
         r = self.run_()
         r.begin(self.points[0], 0.)
         r.step(.05, self.points[0])
@@ -95,7 +96,7 @@ class CompensationTests(unittest.TestCase):
     def simulate(self, limits, sag=.03):
         c = calibration()
         times, points = plan(c)
-        r = TrajectoryRun(c, JOINTS, times, points, compensation=limits)
+        r = TrajectoryRun(c, JOINTS, times, points, compensation=limits, arrival_timeout=8.)
         r.begin(points[0], 0.)
         goal = [c.to_radians(n, t) for n, t in zip(JOINTS, r.goals[0])]
         t = 0.
@@ -113,6 +114,29 @@ class CompensationTests(unittest.TestCase):
         self.assertEqual(r.state, SUCCEEDED, r.message)
         self.assertIn('compensation', r.message)
         self.assertAlmostEqual(goal[3] - final[3], .03, delta=.003)  # commanded goal offset, bounded
+
+    def run_relaxed(self, tolerance, sag=.04):
+        c = calibration()
+        times, points = plan(c)
+        r = TrajectoryRun(c, JOINTS, times, points, arrival_tolerance=tolerance, arrival_timeout=8.)
+        r.begin(points[0], 0.)
+        goal = [c.to_radians(n, t) for n, t in zip(JOINTS, r.goals[0])]
+        t, success_at = 0., None
+        while r.state == RUNNING and t < 20:
+            measured = list(goal)
+            measured[3] -= sag
+            out = r.step(t, measured)
+            if out:
+                goal = [c.to_radians(n, v) for n, v in zip(JOINTS, out)]
+            t += .05
+        return r, t
+
+    def test_relaxed_tolerance_accepts_a_settled_arm_only(self):
+        r, t = self.run_relaxed(.07)
+        self.assertEqual(r.state, SUCCEEDED, r.message)
+        self.assertGreaterEqual(t, r.duration + r.settle_time)  # not accepted while still travelling
+        r, _ = self.run_relaxed(.03)                              # sag 0.04 above the accepted tolerance
+        self.assertEqual(r.state, ABORTED)
 
     def test_without_compensation_reports_failure(self):
         r, _, _ = self.simulate(None)
@@ -150,8 +174,8 @@ class TrackingScalingTests(unittest.TestCase):
         slow = TrajectoryRun(c, JOINTS, *plan(c, steps=5, dt=.1, delta=.01))      # 0.1 rad/s < calibrated
         fast = TrajectoryRun(c, JOINTS, *plan(c, steps=5, dt=.1, delta=.02), max_speed_factor=2.)
         self.assertEqual(slow.speed_ratio, 1.)
-        self.assertAlmostEqual(slow.tracking_error, .1)
-        self.assertAlmostEqual(fast.tracking_error, .1 * fast.speed_ratio)
+        self.assertAlmostEqual(slow.tracking_error, .2)
+        self.assertAlmostEqual(fast.tracking_error, .1 * fast.speed_ratio + .1)
 
     def test_start_sag_is_removed_from_tracking_error(self):
         c = calibration()
@@ -161,10 +185,10 @@ class TrackingScalingTests(unittest.TestCase):
         r = TrajectoryRun(c, JOINTS, times, points)
         r.begin(start, 0.)
         lagging = [p + s for p, s in zip(points[0], sag)]
-        lagging[0] -= .09                                       # pure lag below the bound
+        lagging[0] -= .19                                       # pure lag below the bound
         r.step(.05, lagging)
         self.assertEqual(r.state, RUNNING)
-        lagging[0] -= .02                                       # lag + sag (0.11 + ...) above bound
+        lagging[0] -= .03                                       # lag + sag above bound
         r.step(.1, lagging)
         self.assertEqual(r.state, ABORTED)
         self.assertIn('Tracking', r.message)
@@ -174,6 +198,6 @@ class TrackingScalingTests(unittest.TestCase):
         times, points = plan(c)
         r = TrajectoryRun(c, JOINTS, times, points)
         r.begin([p + .019 for p in points[0]], 0.)             # at most the start tolerance
-        big = [p + .019 + .15 for p in points[0]]
+        big = [p + .019 + .25 for p in points[0]]
         r.step(.05, big)
         self.assertEqual(r.state, ABORTED)

@@ -12,6 +12,7 @@ GoToPose (/station/arm/go_to_pose):
   a violation. Optionally moves the gripper to the pose ticks afterwards.
 """
 import json
+import os
 import threading
 import time
 import urllib.error
@@ -44,6 +45,13 @@ class ArmMotion(Node):
         self.declare_parameter('feedback_max_age_s', .5)
         self.url = self.get_parameter('planner_url').value
         self.ttl = self.get_parameter('plan_ttl_s').value
+        self.leg_cache, self.ids, self.ids_time = {}, '', 0.
+        self.cache_path = os.path.join(os.path.expanduser('~'), 'leg_cache.json')
+        try:
+            with open(self.cache_path) as f:
+                self.leg_cache = json.load(f)
+        except (OSError, ValueError):
+            pass
         self.start_tol = self.get_parameter('start_tolerance_ticks').value
         self.max_age = self.get_parameter('feedback_max_age_s').value
         cb = ReentrantCallbackGroup()
@@ -70,9 +78,15 @@ class ArmMotion(Node):
             self.motors = {m.motor_id: m for m in msg.motors}
             self.motors_time = time.monotonic()
 
-    def measured_ticks(self):
-        with self.lock:
-            motors, age = dict(self.motors), time.monotonic() - self.motors_time
+    def measured_ticks(self, wait=2.):
+        # Before a motion a short feedback gap (Wi-Fi hiccup) is waited out, never used afterwards.
+        deadline = time.monotonic() + wait
+        while True:
+            with self.lock:
+                motors, age = dict(self.motors), time.monotonic() - self.motors_time
+            if age <= self.max_age or time.monotonic() >= deadline:
+                break
+            time.sleep(.05)
         if age > self.max_age:
             raise RuntimeError(f'No fresh robot motor feedback (last {age:.1f} s ago)')
         ticks = []
@@ -82,6 +96,23 @@ class ArmMotion(Node):
                 raise RuntimeError(f'Motor {i}: ' + (m.fault if m and m.fault else 'no fresh feedback'))
             ticks.append(m.position_ticks)
         return ticks
+
+    def planner_ids(self):
+        """Scene + calibration identity of the planner worker (cache validity)."""
+        if time.monotonic() - self.ids_time > 30:
+            st = json.load(urllib.request.urlopen(self.url + '/status', timeout=3))
+            self.ids = f"{st.get('scene_sha256')}|{st.get('calibration_sha256')}"
+            self.ids_time = time.monotonic()
+        return self.ids
+
+    def save_cache(self):
+        try:
+            tmp = self.cache_path + '.tmp'
+            with open(tmp, 'w') as f:
+                json.dump(self.leg_cache, f)
+            os.replace(tmp, self.cache_path)
+        except OSError as exc:
+            self.get_logger().warn(f'Leg cache not saved: {exc}')
 
     def request(self, path, body=None, timeout=120.):
         data = None if body is None else json.dumps(body).encode()
@@ -135,11 +166,29 @@ class ArmMotion(Node):
             pose = next((p for p in poses.poses if p.name == request.pose_name), None)
             if pose is None:
                 raise RuntimeError(f'Unknown pose "{request.pose_name}"')
-            start = self.measured_ticks()
+            if request.start_pose_name:
+                spose = next((p for p in poses.poses if p.name == request.start_pose_name), None)
+                if spose is None:
+                    raise RuntimeError(f'Unknown start pose "{request.start_pose_name}"')
+                start = list(spose.ticks)
+            else:
+                start = self.measured_ticks()
             speed = request.speed_factor or 1.
             began = time.monotonic()
-            result = self.request('/plan', {'start_ticks': start[:7], 'goal_ticks': list(pose.ticks)[:7],
-                                            'speed_factor': speed}, timeout=75.)
+            fixed = request.start_pose_name != ''
+            key = None
+            if fixed:  # pose-to-pose legs never change: computed once, kept on disk for later runs
+                ids = self.planner_ids()
+                key = f'{ids}|{list(start[:7])}|{list(pose.ticks[:7])}|{speed}'
+            if key is not None and key in self.leg_cache:
+                result = self.leg_cache[key]
+                self.get_logger().info(f'Plan to {request.pose_name}: cached leg')
+            else:
+                result = self.request('/plan', {'start_ticks': start[:7], 'goal_ticks': list(pose.ticks)[:7],
+                                                'speed_factor': speed}, timeout=75.)
+                if key is not None and not result['reasons']:
+                    self.leg_cache[key] = result
+                    self.save_cache()
             self.get_logger().info(f'Plan to {request.pose_name} at {speed:g}x in {time.monotonic() - began:.1f} s')
             reasons = list(result['reasons'])
             if pose.warnings:
@@ -153,9 +202,16 @@ class ArmMotion(Node):
                           gripper=list(pose.ticks)[7], traj=traj, executable=not reasons, used=False,
                           sha=result['collision_scene_sha256'], times=result['times'],
                           compensation=[float(c) for c in result['compensation_limit_rad']],
-                          positions=result['positions'])
+                          positions=result['positions'],
+                          ttl=request.valid_for_s or self.ttl,
+                          start_pose=request.start_pose_name,
+                          arrival_tol=float(request.arrival_tolerance_rad),
+                          start_rad=float(request.start_tolerance_rad),
+                          start_tol=max(13 if request.start_pose_name else self.start_tol,
+                                        int(request.start_tolerance_rad * 652) + 1))  # ticks; 13 = 0.02 rad, as the robot
             with self.lock:
-                self.plans = {k: v for k, v in self.plans.items() if time.monotonic() - v['created'] < self.ttl}
+                self.plans = {k: v for k, v in self.plans.items()
+                              if time.monotonic() - v['created'] < v.get('ttl', self.ttl)}
                 self.plans[plan_id] = record
             self.preview_plan, self.preview_start = record, time.monotonic()
             response.success, response.executable, response.plan_id = True, not reasons, plan_id
@@ -196,7 +252,7 @@ class ArmMotion(Node):
     def _go(self, handle):
         with self.lock:
             plan = self.plans.get(handle.request.plan_id)
-            if plan is None or time.monotonic() - plan['created'] > self.ttl:
+            if plan is None or time.monotonic() - plan['created'] > plan.get('ttl', self.ttl):
                 raise RuntimeError('Unknown or expired plan; plan again')
             if plan['used']:
                 raise RuntimeError('Plan already used; plan again')
@@ -205,14 +261,17 @@ class ArmMotion(Node):
             plan['used'] = True
         current = self.measured_ticks()
         drift = max(abs(a - b) for a, b in zip(current[:7], plan['start'][:7]))
-        if drift > self.start_tol:
-            raise RuntimeError(f'Arm moved by {drift} ticks since planning; plan again')
+        if drift > plan.get('start_tol', self.start_tol):
+            raise RuntimeError(f'Arm is {drift} ticks away from where the plan starts'
+                               + (f' (pose "{plan["start_pose"]}"): move it there' if plan.get('start_pose') else '; plan again'))
         if not self.robot.wait_for_server(timeout_sec=3.):
             raise RuntimeError('Robot trajectory action unavailable')
         self.set_status('executing', f'Executing plan to "{plan["pose"]}"')
         goal = ExecuteTrajectory.Goal(trajectory=plan['traj'], plan_id=plan['id'], collision_checked=True,
                                       collision_scene_sha256=plan['sha'],
-                                      compensation_limit_rad=plan['compensation'])
+                                      compensation_limit_rad=plan['compensation'],
+                                      arrival_tolerance_rad=plan.get('arrival_tol', 0.),
+                                      start_tolerance_rad=plan.get('start_rad', 0.))
         feedback = GoToPose.Feedback()
 
         def relay(fb):
@@ -240,7 +299,7 @@ class ArmMotion(Node):
             if time.monotonic() - last_check > .25:
                 last_check = time.monotonic()
                 try:
-                    ticks = self.measured_ticks()
+                    ticks = self.measured_ticks(wait=0)
                     check = self.request('/check', {'ticks': ticks[:7]}, timeout=2.)
                 except Exception as exc:  # monitor unavailable: the robot keeps its own guards
                     self.get_logger().warn(f'Execution monitor: {exc}', throttle_duration_sec=2)
