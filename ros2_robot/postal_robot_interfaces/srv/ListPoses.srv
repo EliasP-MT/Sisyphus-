@@ -1,0 +1,5 @@
+---
+bool success
+string message
+string calibration_sha256
+PoseInfo[] poses

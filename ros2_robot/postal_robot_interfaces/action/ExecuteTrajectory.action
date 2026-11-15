@@ -1,0 +1,19 @@
+# Executed on the robot. Only one goal at a time; a concurrent goal is rejected.
+# Cancel, lease loss, fault, stale feedback or tracking error -> arm held at the
+# last fresh measured position (torque unchanged).
+trajectory_msgs/JointTrajectory trajectory   # rev_motor_01..07, radians
+string plan_id
+bool collision_checked                        # must be true
+string collision_scene_sha256                 # must be non-empty
+---
+int8 SUCCEEDED=0
+int8 REJECTED=1
+int8 ABORTED=2
+int8 CANCELED=3
+int8 error_code
+string message
+float64[] final_positions
+---
+string stage
+float64 progress
+float64 max_tracking_error_rad

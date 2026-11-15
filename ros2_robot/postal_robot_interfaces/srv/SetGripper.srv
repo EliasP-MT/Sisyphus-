@@ -1,0 +1,4 @@
+int32 ticks          # raw encoder ticks inside the configured gripper range
+---
+bool success
+string message

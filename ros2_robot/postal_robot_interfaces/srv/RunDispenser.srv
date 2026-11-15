@@ -1,0 +1,5 @@
+float64 duration_s   # mandatory, 0 < duration <= configured maximum
+int32 speed          # 0 = configured default (-1000); |speed| <= 1000
+---
+bool success
+string message

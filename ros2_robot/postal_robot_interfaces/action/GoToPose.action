@@ -1,0 +1,9 @@
+# Station-side: executes a plan previously returned by PlanToPose.
+string plan_id
+bool include_gripper          # after arm arrival, move gripper to the pose ticks
+---
+bool success
+string message
+---
+string stage
+float64 progress

@@ -1,0 +1,10 @@
+string pose_name
+---
+bool success
+bool executable
+string plan_id
+string message
+string[] reasons            # why the plan is not executable (empty when executable)
+float64 duration_s
+string collision_scene_sha256
+trajectory_msgs/JointTrajectory trajectory
