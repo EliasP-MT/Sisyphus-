@@ -1,0 +1,18 @@
+slam_toolbox:
+  ros__parameters:
+    use_sim_time: true
+    mode: mapping
+    map_frame: postal_sim/map
+    odom_frame: postal_sim/odom
+    base_frame: postal_sim/base_link
+    scan_topic: /postal_sim/scan
+    resolution: 0.04
+    max_laser_range: 5.0
+    minimum_travel_distance: 0.08
+    minimum_travel_heading: 0.08
+    map_update_interval: 1.0
+    transform_publish_period: 0.05
+    throttle_scans: 1
+    use_scan_matching: true
+    use_scan_barycenter: true
+    do_loop_closing: true

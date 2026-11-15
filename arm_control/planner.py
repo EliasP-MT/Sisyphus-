@@ -149,7 +149,8 @@ class Arm:
                     link.bounds = (max(bounds[0], angle-max_step), min(bounds[1], angle+max_step))
             result = self.chain.inverse_kinematics(
                 target_position=xyz, initial_position=seed_full,
-                target_orientation=rotation, orientation_mode='all' if rotation is not None else None)
+                target_orientation=rotation, orientation_mode='all' if rotation is not None else None,
+                regularization_parameter=self.c.get('linear_ik_regularization') if max_step is not None else None)
         finally:
             for link, bounds in zip(links, saved):
                 link.bounds = bounds
