@@ -65,6 +65,9 @@ progress{width:100%}.banner{padding:8px 10px;border-radius:6px;margin:4px 0}.ban
     <button id="capture">Capture current</button><button id="replace">Replace selected</button><button id="delete">Delete selected</button></div>
   <div class="row">Gripper ticks <input type="number" id="gripTicks" min="0" max="4095" step="1"> <button id="grip">Move gripper</button>
     <span class="muted" id="gripNow"></span></div>
+  <div class="row">Gripper: <button id="gripOpen">Open</button><button id="gripClose">Close</button>
+    open <input type="number" id="gripOpenTicks" value="2828" min="0" max="4095" style="width:5em">
+    close <input type="number" id="gripCloseTicks" value="1268" min="0" max="4095" style="width:5em"></div>
 </section>
 
 <section><h2>Base (Kiwi)</h2>
@@ -72,10 +75,10 @@ progress{width:100%}.banner{padding:8px 10px;border-radius:6px;margin:4px 0}.ban
   <div class="row">Linear <input type="number" id="lin" value="0.05" min="0" max="0.15" step="0.01"> m/s
     Angular <input type="number" id="ang" value="0.3" min="0" max="0.6" step="0.05"> rad/s</div>
   <div class="row"><div class="pad">
-    <button data-m="0,0,1">⟲ Q</button><button data-m="1,0,0">▲ W</button><button data-m="0,0,-1">⟳ E</button>
-    <button data-m="0,1,0">◀ A</button><button data-m="0,0,0" disabled>■</button><button data-m="0,-1,0">▶ D</button>
+    <button data-m="0,0,1">⟲ A</button><button data-m="1,0,0">▲ Z</button><button data-m="0,0,-1">⟳ E</button>
+    <button data-m="0,1,0">◀ Q</button><button data-m="0,0,0" disabled>■</button><button data-m="0,-1,0">▶ D</button>
     <span></span><button data-m="-1,0,0">▼ S</button><span></span></div>
-    <div class="muted" style="max-width:16em">Hold a button or key (W/A/S/D/Q/E). Release = stop. The robot also stops if commands stop arriving (0.3 s) or the station link is lost.</div></div>
+    <div class="muted" style="max-width:16em">Hold a button or key (Z/Q/S/D to move, A/E to rotate). Release = stop. The robot also stops if commands stop arriving (0.3 s) or the station link is lost.</div></div>
   <div id="baseInfo" class="muted"></div>
 </section>
 
@@ -226,6 +229,8 @@ $('dispRun').onclick = () => {
 };
 $('dispStop').onclick = () => act('/api/dispenser/stop', {}, 'dispenser stop');
 $('grip').onclick = () => act('/api/gripper', {ticks: parseInt($('gripTicks').value)}, 'gripper');
+$('gripOpen').onclick = () => act('/api/gripper', {ticks: parseInt($('gripOpenTicks').value)}, 'gripper open');
+$('gripClose').onclick = () => act('/api/gripper', {ticks: parseInt($('gripCloseTicks').value)}, 'gripper close');
 $('capture').onclick = async () => {
   const name = $('poseName').value.trim();
   if (!name) { log('Enter a pose name', 'bad'); return; }
@@ -275,9 +280,9 @@ for (const b of document.querySelectorAll('.pad button[data-m]')) {
   b.onpointerdown = e => { e.preventDefault(); b.setPointerCapture(e.pointerId); drive(m); };
   b.onpointerup = b.onpointercancel = release;
 }
-const keys = {w: [1, 0, 0], s: [-1, 0, 0], a: [0, 1, 0], d: [0, -1, 0], q: [0, 0, 1], e: [0, 0, -1]};
-addEventListener('keydown', e => { if (e.target.tagName === 'INPUT' || e.repeat || !keys[e.key]) return; drive(keys[e.key]); });
-addEventListener('keyup', e => { if (keys[e.key]) release(); });
+const keys = {z: [1, 0, 0], s: [-1, 0, 0], q: [0, 1, 0], d: [0, -1, 0], a: [0, 0, 1], e: [0, 0, -1]};
+addEventListener('keydown', e => { if (e.target.tagName === 'INPUT' || e.repeat || !keys[e.key.toLowerCase()]) return; drive(keys[e.key.toLowerCase()]); });
+addEventListener('keyup', e => { if (keys[e.key.toLowerCase()]) release(); });
 addEventListener('blur', release);
 document.addEventListener('visibilitychange', () => { if (document.hidden) release(); });
 loadPoses();
