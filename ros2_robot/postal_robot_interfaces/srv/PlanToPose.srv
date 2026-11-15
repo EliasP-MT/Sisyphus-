@@ -1,4 +1,5 @@
 string pose_name
+float64 speed_factor        # scales calibrated velocity/acceleration/jerk; 0 = 1.0
 ---
 bool success
 bool executable

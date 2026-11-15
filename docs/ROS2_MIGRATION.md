@@ -129,6 +129,14 @@ PC (Ubuntu 24.04)                                RDK X5 (Ubuntu 22.04, aarch64)
   6 ticks depuis le calcul ; chaque plan est à usage unique et expire après
   120 s. Pendant l'exécution, la pose mesurée est revérifiée en collision à
   4 Hz et l'objectif robot est annulé en cas de violation.
+* **Vitesse par plan** : `PlanToPose.speed_factor` (0,1 à 2,0 ; champ
+  « Speed » de l'interface) met à l'échelle la vitesse, l'accélération et le
+  jerk calibrés du profil Ruckig. Le chemin, et donc le contrôle de collision,
+  ne change pas. Le robot refuse toute trajectoire plus rapide que
+  `max_speed_factor` × la vitesse calibrée (2,0 par défaut) et règle le
+  registre de vitesse de chaque servo sur la vitesse de crête du plan, avec
+  25 % de marge, entre la vitesse calibrée et ce plafond. Exemple
+  `scan → vertical` : 43,5 s à 0,5×, 22,1 s à 1×, 11,5 s à 2×.
 * **Compensation bornée de l'erreur statique** (choix de l'opérateur) : sous
   gravité, J3/J4 restent 17 à 26 ticks sous la consigne (≈ 10 mm au bout de
   l'outil). Une fois le bras immobile, la consigne finale est décalée de l'erreur

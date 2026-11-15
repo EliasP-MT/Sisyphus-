@@ -195,6 +195,13 @@ class CoreSimTest(unittest.TestCase):
         result = self.execute(trajectory(start, delta=.05, duration=1.))
         self.assertEqual(result.error_code, ExecuteTrajectory.Result.SUCCEEDED, result.message)
         self.assertAlmostEqual(self.measured()[0], start[0] + .05, delta=.011)
+        start = self.measured()
+        result = self.execute(trajectory(start, delta=-.25, duration=1.))   # ~1.7x calibrated speed
+        self.assertEqual(result.error_code, ExecuteTrajectory.Result.SUCCEEDED, result.message)
+        self.assertAlmostEqual(self.measured()[0], start[0] - .25, delta=.011)
+        result = self.execute(trajectory(self.measured(), delta=.4, duration=1.))  # ~2.7x > ceiling
+        self.assertEqual(result.error_code, ExecuteTrajectory.Result.REJECTED)
+        self.assertIn('velocity', result.message)
 
     def test_4_concurrent_and_cancel(self):
         self.activate()

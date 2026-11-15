@@ -21,7 +21,7 @@ class TrajectoryError(ValueError):
 class TrajectoryRun:
     def __init__(self, calibration, names, times, points, *, start_tolerance=.02,
                  arrival_tolerance=.01, arrival_timeout=8., max_step_gap=.25,
-                 velocity_margin=1.25, compensation=None, settle_time=.4, settle_rad=.003,
+                 velocity_margin=1.25, max_speed_factor=1., compensation=None, settle_time=.4, settle_rad=.003,
                  max_compensation_steps=5):
         if tuple(names) != JOINTS:
             raise TrajectoryError('Trajectory must list rev_motor_01..07 in order')
@@ -32,7 +32,9 @@ class TrajectoryRun:
             raise TrajectoryError('time_from_start must start at 0 and strictly increase')
         c = calibration.data
         self.tracking_error = c['tracking_error_rad']
-        vmax = c.get('max_velocity_rad_s', float('inf')) * velocity_margin
+        if not (math.isfinite(max_speed_factor) and 0 < max_speed_factor <= 3):
+            raise TrajectoryError('max_speed_factor must be within (0, 3]')
+        vmax = c.get('max_velocity_rad_s', float('inf')) * max_speed_factor * velocity_margin
         goals = []
         for index, point in enumerate(points):
             if len(point) != 7 or any(not math.isfinite(q) for q in point):
@@ -44,7 +46,7 @@ class TrajectoryRun:
         for i in range(1, len(points)):
             dt = times[i] - times[i - 1]
             if max(abs(b - a) for a, b in zip(points[i - 1], points[i])) > vmax * dt + 1e-9:
-                raise TrajectoryError(f'Point {i}: velocity above the calibrated limit')
+                raise TrajectoryError(f'Point {i}: velocity above {max_speed_factor:g}x the calibrated limit')
         self.calibration, self.times, self.points, self.goals = calibration, list(times), points, goals
         self.start_tolerance, self.arrival_tolerance = start_tolerance, arrival_tolerance
         self.arrival_timeout, self.max_step_gap = arrival_timeout, max_step_gap
@@ -58,6 +60,15 @@ class TrajectoryRun:
         self.start_time = self.last_step = None
         self.commanded = -1
         self.max_tracking = 0.
+
+    def peak_ticks_per_s(self):
+        """Peak commanded speed of each joint, in encoder ticks per second."""
+        peaks = [0.] * 7
+        for i in range(1, len(self.goals)):
+            dt = self.times[i] - self.times[i - 1]
+            for j in range(7):
+                peaks[j] = max(peaks[j], abs(self.goals[i][j] - self.goals[i - 1][j]) / dt)
+        return peaks
 
     @property
     def duration(self):

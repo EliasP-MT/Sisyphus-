@@ -129,3 +129,16 @@ class CompensationTests(unittest.TestCase):
         times, points = plan(c)
         with self.assertRaises(TrajectoryError):
             TrajectoryRun(c, JOINTS, times, points, compensation=[.5] * 7)
+
+
+class SpeedFactorTests(unittest.TestCase):
+    def test_faster_plan_needs_speed_ceiling(self):
+        c = calibration()
+        times, points = plan(c, steps=5, dt=.1, delta=.02)  # 0.2 rad/s > 0.1457 * 1.25
+        with self.assertRaises(TrajectoryError):
+            TrajectoryRun(c, JOINTS, times, points)
+        r = TrajectoryRun(c, JOINTS, times, points, max_speed_factor=2.)
+        self.assertAlmostEqual(r.peak_ticks_per_s()[0], .02 * 651.9 / .1, delta=10)
+        times, points = plan(c, steps=5, dt=.1, delta=.05)  # 0.5 rad/s > 2x ceiling
+        with self.assertRaises(TrajectoryError):
+            TrajectoryRun(c, JOINTS, times, points, max_speed_factor=2.)
