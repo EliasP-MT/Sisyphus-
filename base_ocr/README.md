@@ -1,38 +1,36 @@
-# Standalone base-camera OCR
+# Base-camera OCR
 
-This branch contains the letter recipient reader, independent of SLAM and arm OCR.
-The files under `base_ocr/` are self-contained; main-owned files are unchanged.
+Call `read_recipient_name()` from `ocr_base.py`. It opens the robot base camera,
+discards five frames, reads the sixth, releases the camera and runs PP-OCRv5 Mobile
+on that full image. Nearby words on the topmost detected line are joined in
+left-to-right order, then matched to `recipients.json`. The returned string uses
+the spelling in that list. Empty, low-confidence or ambiguous results return
+`""`; camera, configuration and model errors raise exceptions. Later lines are
+ignored, even if they contain a known name.
+
+```python
+from ocr_base import read_recipient_name
+
+name = read_recipient_name()
+```
+
+The robot defaults to `/dev/video0`; pass `device="/dev/videoN"` if its base
+camera uses another device. The caller must select the physical base camera.
+Use `names_path="path/to/names.json"` to select another JSON list of strings.
+
+Install and test with a Mac USB camera:
 
 ```bash
 cd base_ocr
 python3 -m pip install -r requirements.txt
-python3 ocr_base.py --target mac --device 0 --test
+python3 ocr_base.py --target mac --device 0
 ```
 
-Open http://127.0.0.1:8768. Device 0 must be the attached USB camera; close
-other camera owners first. On the RDK use `python3 ocr_base.py --test` (default
-robot backend and `/dev/video0`). Without `--test`, read once and print a name.
-`--image letter.jpg` accepts a saved image; `--benchmark 5` reports warm stage timings.
-
-```python
-from ocr_base import BaseOCR
-
-with BaseOCR(target="mac", device=0) as reader:
-    reader.prepare()
-    name = reader.read_name()
-```
-
-PP-OCRv5 Mobile detection/recognition run on the entire unchanged BGR frame.
-No extra model, crop or preprocessing is applied outside PaddleOCR. Address
-selection uses text positions and street/postcode patterns; unsupported or
-ambiguous layouts return an empty string. The returned first line can include
-a title. This heuristic needs validation on real letters.
-
-Models load once. The camera stays open and continuously retains its latest
-frame. OCR results/boxes/timings are shown only at actual inference speed.
-The one-second budget raises TimeoutError after processing when exceeded;
-this is not a hard execution timeout or a proven RDK performance guarantee.
-PaddlePaddle installation requires a wheel matching your OS, CPU and Python.
+Or call `read_recipient_name(target="mac", device=0)`. The script prints one
+result and exits. There is no preview or background capture. Models are cached
+between function calls; the first call may load/download model weights. Capture,
+model initialization and CPU inference have no guaranteed subsecond latency.
+There is no additional crop, image preprocessing or separate detection model.
 
 Model-free checks:
 
