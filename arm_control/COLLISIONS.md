@@ -125,11 +125,9 @@ doivent avoir leur pose actualisée dans `base_link` après un déplacement.
 
 ## Exécution
 
-Après calibration des moteurs et validation de la scène, reprendre la commande
-`plan --from-station` de README avec `--scene arm_control/robot_scene.local.json`.
-Ajouter explicitement `--execute` pour autoriser le mouvement. Le nudge de
-commissioning utilise aussi cette scène. Le jog en ticks, destiné à identifier
-les moteurs avant calibration, reste manuel et sans évitement géométrique.
+L'exécution passe par la station ROS 2 : le planner worker charge la scène
+(`station.sh` : variable `SCENE`), le robot exécute la trajectoire validée.
+Voir `docs/ROS2_MIGRATION.md`.
 
 ## Limites pratiques
 
