@@ -49,12 +49,14 @@ class TrajectoryRun:
                 raise TrajectoryError(f'Point {i}: velocity above {max_speed_factor:g}x the calibrated limit')
         self.calibration, self.times, self.points, self.goals = calibration, list(times), points, goals
         # Speed of this plan relative to the calibrated velocity. Servo lag grows
-        # with speed, so the tracking bound grows with it, at half rate
-        # (1x -> base bound, 2x -> 1.5x the base bound), never faster.
+        # with speed, so the tracking bound grows in proportion (1x -> base bound,
+        # 1.5x -> 1.5x, 2x -> 2x). The static sag measured at the start is
+        # removed from the error (see begin()), so the bound limits lag only.
         peak = max((max(abs(b - a) for a, b in zip(points[i - 1], points[i])) / (times[i] - times[i - 1])
                     for i in range(1, len(points))), default=0.)
         self.speed_ratio = max(1., peak / c['max_velocity_rad_s']) if c.get('max_velocity_rad_s') else 1.
-        self.tracking_error *= 1 + .5 * (self.speed_ratio - 1)
+        self.tracking_error *= self.speed_ratio
+        self.bias = [0.] * 7
         self.start_tolerance, self.arrival_tolerance = start_tolerance, arrival_tolerance
         self.arrival_timeout, self.max_step_gap = arrival_timeout, max_step_gap
         compensation = list(compensation or [0.] * 7)
@@ -87,6 +89,9 @@ class TrajectoryRun:
         if error > self.start_tolerance:
             raise TrajectoryError(
                 f'Measured start differs from plan by {error:.3f} rad (> {self.start_tolerance}); replan')
+        # Static (gravity) sag at the held start pose: measured - planned, per joint,
+        # bounded by the start tolerance already enforced above.
+        self.bias = [m - p for m, p in zip(measured, self.points[0])]
         self.start_time = self.last_step = now
         return error
 
@@ -100,7 +105,7 @@ class TrajectoryRun:
             return self._abort(f'Control loop late by {now - self.last_step:.3f} s; motion stopped')
         self.last_step = now
         reference = self.points[max(self.commanded, 0)]  # planned pose, not the offset goal
-        error = max(abs(a - b) for a, b in zip(measured, reference))
+        error = max(abs(a - b - o) for a, b, o in zip(measured, reference, self.bias))
         self.max_tracking = max(self.max_tracking, error)
         if error > self.tracking_error:
             return self._abort(f'Tracking error {error:.3f} rad exceeds {self.tracking_error} rad')

@@ -145,12 +145,35 @@ class SpeedFactorTests(unittest.TestCase):
 
 
 class TrackingScalingTests(unittest.TestCase):
-    def test_tracking_bound_grows_half_as_fast_as_speed(self):
+    def test_tracking_bound_is_proportional_to_speed(self):
         c = calibration()
         slow = TrajectoryRun(c, JOINTS, *plan(c, steps=5, dt=.1, delta=.01))      # 0.1 rad/s < calibrated
         fast = TrajectoryRun(c, JOINTS, *plan(c, steps=5, dt=.1, delta=.02), max_speed_factor=2.)
         self.assertEqual(slow.speed_ratio, 1.)
         self.assertAlmostEqual(slow.tracking_error, .1)
-        self.assertAlmostEqual(fast.speed_ratio, 2. / .1457 * .1, delta=.01)   # ~1.37x
-        self.assertAlmostEqual(fast.tracking_error, .1 * (1 + .5 * (fast.speed_ratio - 1)))
-        self.assertLess(fast.tracking_error, .1 * fast.speed_ratio)
+        self.assertAlmostEqual(fast.tracking_error, .1 * fast.speed_ratio)
+
+    def test_start_sag_is_removed_from_tracking_error(self):
+        c = calibration()
+        times, points = plan(c)
+        sag = [0, 0, -.018, -.018, 0, 0, 0]                    # held start pose sags, within start tolerance
+        start = [p + s for p, s in zip(points[0], sag)]
+        r = TrajectoryRun(c, JOINTS, times, points)
+        r.begin(start, 0.)
+        lagging = [p + s for p, s in zip(points[0], sag)]
+        lagging[0] -= .09                                       # pure lag below the bound
+        r.step(.05, lagging)
+        self.assertEqual(r.state, RUNNING)
+        lagging[0] -= .02                                       # lag + sag (0.11 + ...) above bound
+        r.step(.1, lagging)
+        self.assertEqual(r.state, ABORTED)
+        self.assertIn('Tracking', r.message)
+
+    def test_sag_cannot_hide_a_real_error(self):
+        c = calibration()
+        times, points = plan(c)
+        r = TrajectoryRun(c, JOINTS, times, points)
+        r.begin([p + .019 for p in points[0]], 0.)             # at most the start tolerance
+        big = [p + .019 + .15 for p in points[0]]
+        r.step(.05, big)
+        self.assertEqual(r.state, ABORTED)
