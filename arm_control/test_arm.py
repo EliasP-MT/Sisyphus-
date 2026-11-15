@@ -232,6 +232,44 @@ class ModelTests(unittest.TestCase):
             plan['samples'][-1]['q_rad'] = [20]*7
             with self.assertRaises(ValueError): asyncio.run(execute(fake_station(c), arm, plan))
 
+    def test_paced_executor_handles_slow_checks_without_catchup(self):
+        c = calibration()
+        arm = Arm(URDF, c)
+        with collision_scene(arm) as world:
+            target = arm.fk(np.array([0.0008]*7))[:3, 3]
+            plan = arm.plan([0]*7, [target])
+            original = world.require_pose
+            def slow_check(*args):
+                time.sleep(.15)  # Exceeds the streaming lateness guard.
+                return original(*args)
+            world.require_pose = slow_check
+            s = fake_station(c)
+            progress = []
+            async def run():
+                async def feedback():
+                    while True:
+                        s.received = time.monotonic()
+                        await asyncio.sleep(.01)
+                reader = asyncio.create_task(feedback())
+                try:
+                    await execute(s, arm, plan, paced=True, progress=progress.append)
+                finally:
+                    reader.cancel()
+                    await asyncio.gather(reader, return_exceptions=True)
+            asyncio.run(run())
+            self.assertTrue(any('paced mode' in p for p in progress))
+            self.assertTrue(s.writes)
+
+    def test_stream_period_keeps_exact_final_target(self):
+        c=calibration();arm=Arm(URDF,c)
+        with collision_scene(arm):
+            target=arm.fk(np.array([.0008]*7))[:3,3]
+            plan=arm.plan([0]*7,[target]);s=fake_station(c)
+            asyncio.run(execute(s,arm,plan,command_period=.06))
+            from planner import joints_to_ticks
+            self.assertEqual(s.writes[-1][0],0x2a)
+            self.assertEqual(s.writes[-1][1],joints_to_ticks(c,plan['samples'][-1]['q_rad']))
+
 
 if __name__ == '__main__':
     unittest.main()

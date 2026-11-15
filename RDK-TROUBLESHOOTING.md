@@ -1,5 +1,25 @@
 # RDK troubleshooting notes
 
+## Full rover CAD from Martin USB
+
+`/media/evan/MARTIN_USB/full_robot_box_complete.step` (163 MB), SHA256
+`7248490e2f068d324c7f5b1c99cc8f8e00b4879e71c399fcebae9aa60097bc0d`.
+OpenCascade transferred one root: 9 solids, 69,949 shells, 70,136 faces.
+Full assembly bounds in metres: [-0.202021, -0.164107, -0.092932]
+to [0.142479, 0.382601, 0.256227]. The solid-only converter omitted most
+of this assembly and returned the same nine box solids as the older STEP.
+Do not approve that incomplete manifest for rover collision checking.
+`cad.py` now refuses surface-shell assemblies until a surface-aware importer
+is implemented. Generated partial geometry is ignored, not deployment-ready.
+
+Surface-aware inspection import is now implemented in `import_surface_cad.py`.
+It exported all 70,136 faces (23 verified zero-area faces skipped), 109,954
+triangles, preserving assembly coordinates in metres. Full assembly is visible
+in the calibration UI under "Inspect full CAD assembly". Its separate
+`surface-assembly-preview-v1` format intentionally cannot be mistaken for an
+articulated/validated collision manifest. Moving arm part bindings and the
+CAD-to-URDF registration still need to be established before deployment.
+
 ## Current ID assignment — supersedes older notes below
 
 Arm alone was verified to contain IDs 1–8 (not just 1–6), explaining

@@ -142,3 +142,105 @@ et leur discrétisation ne garantissent pas le jerk réel. Les tolérances de
 mesurée. Le programme arrête les envois sur erreur et conserve le dernier
 objectif/couple : ce dernier petit déplacement peut finir ; une perte réseau
 ne garantit pas un arrêt physique. Aucun essai sur le robot n’a été effectué.
+# Interactive model calibration
+
+Keep Station and the laptop TCP tunnel on port 18888 running, then launch:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 arm_control/calibration_ui.py
+```
+
+Open http://127.0.0.1:8891. The interface reads Station telemetry only; it never
+opens the serial bus or sends motor commands. Select live readings or a saved
+pose from `poses.local.json`, adjust seven joint directions/zero offsets/scales,
+and compare several poses. Default scale is 4096/(2π) ticks/radian. Align-to-angle
+requires a measured physical model angle. Do not call an arbitrary pose zero.
+The gripper uses its Station range for display and is not in the seven-axis fit.
+
+Save creates a new ignored `calibration-candidate-*.local.json`, preserving the
+current config, calibration ranges and motor IDs. The numerical candidate builder
+keeps `hardware_verified=false`. The UI's **Save verified calibration** action
+records the operator's explicit physical-model confirmation, sets that flag,
+and activates the saved file for subsequent execution checks. This is an
+operator declaration, not an automatic geometric proof. Collision and feedback
+checks still apply. Scale changes are supported by the planner;
+candidate velocity is reduced if necessary to respect the servo tick-speed cap.
+Internet access is required to load the official URDF/mesh and browser libraries.
+
+### Simulation and execution menu
+
+The full rover CAD can supply fixed obstacles while the original URDF supplies
+the moving arm. Run `build_rover_scene.py <full_robot_box_complete.step> --output
+arm_control/assets/rover-fixed.local` in the arm environment. It selects the
+named chassis/box assemblies and explicitly excludes the CAD ElRobot assembly.
+Shared `base_link` and `ST3215_1_v1_1` geometry fit the CAD frame to the URDF.
+This fit is provisional: generated scenes remain unverified, and registration
+outside the execution tolerance is rejected unless the registration has a separate
+explicit `operator_accepted` record. The operator accepted the current CAD fit
+with its 5.1 mm maximum residual on 2026-11-15; the residual remains recorded.
+Surface-only obstacles use conservative bounding-box containment as well as
+triangle contact checks; this can reject valid motion through a cavity.
+Keep the source USB connected because source and mesh hashes are checked.
+Load the generated `rover-scene.local.json` using `--scene` to show the fixed
+rover alongside the articulated arm in the UI and check simulation paths.
+
+Choose a target in **Simulate → Validate → Move**. Preview starts from fresh
+real encoder readings using the current model adjustments, then plays the
+planned seven-joint trajectory. It leaves the gripper unchanged. Changes to
+adjustments invalidate the local confirmation. A preview expires after ten
+minutes and a confirmation token can be used only once.
+
+Real execution requires launching with `--scene <registered-scene.local.json>`
+and `--verified-config <verified-calibration.local.json>`. The latter must match
+the current candidate with `hardware_verified=true`, following independent
+physical verification. Do not set that flag just to unlock the button.
+Without these files, previews remain available but execution is blocked with
+an explanation. With a scene, the path is collision-planned and validated,
+including quantized setpoints. Simulation completion alone is not approval.
+Execution rechecks the scene, calibration, fresh measured start, holding torque,
+collisions and tracking through the existing executor. It does not enable torque.
+Network interruption cannot guarantee a hardware stop; the last target and
+holding torque may remain active. Current or target poses outside calibrated
+planner limits must be corrected rather than clamped.
+
+UI execution uses paced checked targets rather than 50 Hz real-time streaming
+over Wi-Fi: expensive full-rover checks measured about 676 ms on this PC.
+It selects existing trajectory points at least 100 ms apart, checks the measured
+pose and actual-to-next segment, and holds the last target while checks run.
+There is no catch-up burst. Servo speed/acceleration caps and feedback guards
+remain enabled. Physical motion is slower and may pause; the continuous Ruckig
+timing shown in simulation is not the wall-clock timing of paced execution.
+
+### Simplified collision geometry
+
+`simplify_collision.py` generates conservative triangle/voxel boxes, merged
+without filling unoccupied cells. `--arm-boxes` also replaces arm collision
+meshes with enclosing link boxes, retaining `Joint_01_1` at the tight base mount.
+`--retain-chassis` preserves the detailed chassis around that mounting clearance.
+Visual meshes remain detailed. The active hybrid scene uses these options:
+
+```bash
+arm_control/.venv/bin/python arm_control/simplify_collision.py \
+  arm_control/assets/rover-fixed.local/rover-scene.local.json \
+  --output arm_control/assets/rover-fixed.local/rover-fast-scene.local.json \
+  --cell .005 --arm-boxes --retain-chassis
+```
+
+The output starts unverified. `benchmark_proxy.py` compares it against the source
+at saved poses and interpolated configurations. `--activate` refuses if any
+sample misses a source collision; otherwise it inherits the source scene's
+operator approval and records the comparison. Suspected arm contacts from the
+boxes are refined against the original arm geometry, rather than excluding
+links or accepting the proxy's false-positive contact. This sample comparison is not an
+exhaustive collision proof. Triangle-cell coverage and enclosing boxes are also
+tested, and all planned paths remain checked at execution. Two additional
+conservative rejections were seen initially; one remained after exact arm
+contact refinement in the 33-configuration comparison. Measured steady p95 was
+about 11 ms for the refined proxy versus 7 ms for the detailed model in that run;
+simplification alone is therefore not a guaranteed steady-state speedup. Cold
+query/setup overhead is warmed outside the command schedule.
+
+Validated proxies with measured p95 check time below half the command interval
+use streamed execution at a 60 ms interval, selecting existing checked samples
+and keeping the exact endpoint. Unvalidated/slower scenes use paced mode.
+The original 100 ms lateness guard is retained; no automatic physical retry occurs.

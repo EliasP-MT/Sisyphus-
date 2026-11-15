@@ -1,0 +1,92 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Arm model calibration</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*{box-sizing:border-box}body{margin:0;background:#111720;color:#e7edf5;font:14px system-ui}main{display:grid;grid-template-columns:400px 1fr;height:100vh}aside{padding:20px;overflow:auto;background:#1c2532}h1{font-size:22px;margin-top:0}p{line-height:1.5;color:#bdcadd}button,select,input{font:inherit;padding:7px;border:1px solid #526077;border-radius:5px;background:#111b29;color:#fff}button{cursor:pointer;background:#284a63}button:hover{background:#366582}input{width:100%}label{display:block;font-size:12px;color:#c5d4e6}section{border:1px solid #405066;border-radius:8px;padding:12px;margin:12px 0}.fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}.wide{grid-column:1/-1}#viewport{position:relative;min-width:0}#overlay{position:absolute;top:14px;left:16px;background:#152131dd;padding:12px;max-width:85%}#notice{white-space:pre-wrap;color:#ffd38c}.bad{color:#ffb2ab}small{display:block;margin:8px 0}#modelError{color:#ffb2ab}@media(max-width:800px){main{grid-template-columns:1fr;height:auto}aside{max-height:55vh}#viewport{height:60vh}}
+dialog{background:#202c3b;color:#e7edf5;border:1px solid #60758e;border-radius:12px;max-width:520px;padding:24px}dialog::backdrop{background:#0009}dialog button{margin:8px 8px 0 0}button:disabled{opacity:.45;cursor:not-allowed}
+</style>
+<main><aside><h1>Arm model calibration</h1><p>Match the virtual arm to the real arm. Changes affect the model only—there are no motor controls.</p>
+<label>Encoder source <select id="source"><option value="live">Live Station</option></select></label>
+<section><strong>Predefined poses</strong><p>Position and support the real arm, hold it still, then record its live encoders.</p><label>New pose name<input id="poseName" placeholder="e.g. ready" maxlength="60"></label><p><button id="addPose">Add current pose</button></p><label>Existing pose<select id="existingPose"></select></label><p><button id="updatePose">Update from current arm</button></p><small>Update replaces the selected pose after confirmation. A backup is kept. These buttons never move the arm.</small></section>
+<p>1. Choose live or a saved pose.<br>2. Correct each direction and zero offset.<br>3. Check another pose; keep the nominal scale unless measured.<br>4. Save a candidate for independent validation.</p>
+<section><strong>Simulate → Validate → Move</strong><label>Target pose<select id="motionTarget"></select></label><p><button id="simulate">Simulate from real arm</button></p><progress id="motionProgress" value="0" max="1" style="width:100%"></progress><p id="motionStatus">Seven arm joints only. Gripper remains unchanged.</p><button id="execute" disabled>Validate simulation & move real arm</button><p><button id="showLive">Return to live model</button></p><small>Real execution requires a validated calibration and registered collision scene. Prepare holding torque in Station. On a command error, targets stop advancing; holding torque remains active. Network loss is not a physical emergency stop.</small></section>
+<button id="save">Save verified calibration</button> <button id="reset">Reset adjustments</button><p id="notice">Saving records your confirmation that the virtual arm matches the physical arm. Collision and execution checks still apply.</p>
+<div id="joints"></div></aside><div id="viewport"><div id="overlay"><strong id="connection">Connecting…</strong><small>Drag to orbit · Scroll to zoom</small><button id="front">Front</button> <button id="side">Side</button> <button id="top">Top</button><small id="modelError">Loading model…</small></div></div></main>
+<dialog id="deployDialog"><h2>Simulation complete</h2><p>Do you want to deploy this motion to the real arm?</p><p id="deployReason"></p><p>The gripper stays unchanged. Stay near the motor power switch.</p><button id="keepSimulation">Keep simulation only</button><button id="deployReal">Deploy to real arm</button></dialog>
+<script type="importmap">{"imports":{"three":"https://esm.sh/three@0.170.0","three/":"https://esm.sh/three@0.170.0/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import {OrbitControls} from 'three/examples/jsm/controls/OrbitControls.js';
+import {OBJLoader} from 'three/examples/jsm/loaders/OBJLoader.js';
+import URDFLoader from 'https://esm.sh/urdf-loader@0.12.6?external=three';
+const $=id=>document.getElementById(id), nominal=4096/(2*Math.PI);
+const config=await fetch('/config').then(r=>r.json()), poses=await fetch('/poses').then(r=>r.json());
+let live={motors:{},timestamp:0}, robot, motion=null, simulation=null, simulationView=false;
+const initial=config.joints.map((j,i)=>({...j,zero_ticks:j.zero_ticks??2048,sign:j.sign??(i===2?1:-1),ticks_per_rad:j.ticks_per_rad??nominal}));
+let joints=structuredClone(initial);
+function refreshPoses(selected=$('source').value){$('source').innerHTML='';$('source').add(new Option('Live Station','live'));$('existingPose').innerHTML='';$('motionTarget').innerHTML='';for(const name of Object.keys(poses.poses)){$('source').add(new Option(name,name));$('existingPose').add(new Option(name,name));$('motionTarget').add(new Option(name,name));}if(selected==='live'||poses.poses[selected])$('source').value=selected;}
+refreshPoses('live');
+async function recordPose(replace){const name=(replace?$('existingPose').value:$('poseName').value).trim();if(!name){$('notice').textContent='Enter or select a pose name.';return;}if(!validLive()){$('notice').textContent='Cannot record: live telemetry is stale.';return;}if(replace&&!confirm(`Replace "${name}" with the current physical arm position? A backup will be kept.`))return;const add=$('addPose'),update=$('updatePose');add.disabled=update.disabled=true;$('notice').textContent='Checking that the arm is steady…';try{const r=await fetch('/pose',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,replace})});const result=await r.json();if(!r.ok)throw Error(result.error);poses.poses=result.poses;refreshPoses(name);$('existingPose').value=name;$('poseName').value='';renderPose();$('notice').textContent=`Saved "${name}" from live encoders. No movement sent.`;}catch(e){$('notice').textContent='Recording failed: '+e.message;}finally{add.disabled=update.disabled=false;}}
+$('addPose').onclick=()=>recordPose(false);$('updatePose').onclick=()=>recordPose(true);
+function motors(){return $('source').value==='live'?live.motors:poses.poses[$('source').value].motors;}
+function validLive(){return !live.error&&Date.now()/1000-live.timestamp<2;}
+function build(){
+ $('joints').innerHTML='';joints.forEach((j,i)=>{
+  const card=document.createElement('section');card.innerHTML=`<strong>J${i+1} · Motor ${j.motor_id}</strong><small id="read${i}">Waiting…</small><div class="fields"><label>Direction<select id="sign${i}"><option value="1">+ Increasing</option><option value="-1">− Decreasing</option></select></label><label>Zero encoder (ticks)<input id="zero${i}" type="number" min="0" max="4095" step="1"></label><label class="wide">Scale (ticks / radian)<input id="scale${i}" type="number" min="100" max="5000" step="0.1"></label><label>Known angle (degrees)<input id="angle${i}" type="number" value="0" step="1"></label><button id="align${i}">Align to angle</button></div><small>Align only to a physical angle you have measured.</small>`;
+  $('joints').append(card);$(`sign${i}`).value=j.sign;$(`zero${i}`).value=j.zero_ticks;$(`scale${i}`).value=j.ticks_per_rad;
+  for(const [prefix,key] of [['sign','sign'],['zero','zero_ticks'],['scale','ticks_per_rad']])$(`${prefix}${i}`).oninput=e=>{j[key]=Number(e.target.value);renderPose();};
+  $(`align${i}`).onclick=()=>{if($('source').value==='live'&&!validLive()){ $('notice').textContent='Live telemetry is stale; cannot align.';return;}const m=motors()[j.motor_id];if(!m){$('notice').textContent='Missing encoder';return;}const zero=Math.round(m.position-j.sign*Number($(`angle${i}`).value)*Math.PI/180*j.ticks_per_rad);if(zero<0||zero>4095){$('notice').textContent='Zero would cross encoder wrap; needs explicit wrap handling.';return;}j.zero_ticks=zero;$(`zero${i}`).value=zero;renderPose();};
+ });
+}
+const viewport=$('viewport'),scene=new THREE.Scene();scene.background=new THREE.Color('#111720');
+const camera=new THREE.PerspectiveCamera(42,1,.001,20);camera.position.set(.6,.4,.6);
+const renderer=new THREE.WebGLRenderer({antialias:true});viewport.append(renderer.domElement);
+const orbit=new OrbitControls(camera,renderer.domElement);orbit.target.set(0,.2,0);orbit.update();
+let cadAssembly=null, cadVisible=false;
+const cadButton=document.createElement('button');cadButton.textContent='Inspect full CAD assembly';$('overlay').append(cadButton);
+const cadMessage=document.createElement('small');cadMessage.textContent='CAD coordinates are not yet registered to the moving arm.';$('overlay').append(cadMessage);
+cadButton.onclick=async()=>{try{if(!cadAssembly){cadButton.disabled=true;cadMessage.textContent='Loading complete USB CAD…';const info=await fetch('/cad/assembly.json').then(r=>{if(!r.ok)throw Error('Assembly import not available yet');return r.json();});cadAssembly=await new OBJLoader().loadAsync('/cad/assembly.obj');cadAssembly.rotation.set(-Math.PI/2,0,-Math.PI/2);cadAssembly.traverse(n=>{if(n.isMesh)n.material=new THREE.MeshStandardMaterial({color:0x70afcf,roughness:.65,side:THREE.DoubleSide});});scene.add(cadAssembly);cadMessage.textContent=`Full CAD: ${info.faces.toLocaleString()} faces · Static original assembly · Not registered`;}
+cadVisible=!cadVisible;cadAssembly.visible=cadVisible;roverEnvironment.visible=!cadVisible;if(robot)robot.visible=!cadVisible;cadButton.textContent=cadVisible?'Return to calibrated arm':'Inspect full CAD assembly';const object=cadVisible?cadAssembly:robot;if(object){const box=new THREE.Box3().setFromObject(object),center=box.getCenter(new THREE.Vector3()),size=box.getSize(new THREE.Vector3()).length();orbit.target.copy(center);camera.position.copy(center).add(new THREE.Vector3(size,size*.65,size));orbit.update();}}catch(e){cadMessage.textContent=e.message;}finally{cadButton.disabled=false;}};
+scene.add(new THREE.HemisphereLight(0xffffff,0x405065,3));const lamp=new THREE.DirectionalLight(0xffffff,3);lamp.position.set(1,2,3);scene.add(lamp);scene.add(new THREE.GridHelper(1,20));
+const roverEnvironment=new THREE.Group();roverEnvironment.rotation.set(-Math.PI/2,0,-Math.PI/2);scene.add(roverEnvironment);
+fetch('/cad/scene').then(r=>r.json()).then(async data=>{for(const entry of data.surface_meshes??[]){const object=await new OBJLoader().loadAsync(entry.mesh);object.position.set(...entry.xyz_m);object.rotation.set(...entry.rpy_rad,'ZYX');object.traverse(n=>{if(n.isMesh)n.material=new THREE.MeshStandardMaterial({color:0x3186a3,roughness:.8,side:THREE.DoubleSide});});roverEnvironment.add(object);}if(data.surface_meshes?.length)cadMessage.textContent='Fixed rover CAD + articulated URDF arm · Registration remains unverified';}).catch(e=>{cadMessage.textContent='Rover scene failed: '+e.message;});
+const manager=new THREE.LoadingManager();manager.onError=url=>$('modelError').textContent='Failed asset: '+url;
+const loader=new URDFLoader(manager);loader.parseCollision=false;
+loader.load('https://raw.githubusercontent.com/norma-core/norma-core/v0.1.0-beta.10/software/station/clients/station-viewer/public/devices/elrobot/elrobot_follower.urdf',r=>{robot=r;robot.rotation.set(-Math.PI/2,0,-Math.PI/2);robot.ignoreLimits=true;scene.add(robot);$('modelError').textContent='Live comparison only · Collision geometry not validated';renderPose();},undefined,e=>$('modelError').textContent=String(e));
+function renderPose(){
+ if(simulationView)return;
+ const current=motors();
+ joints.forEach((j,i)=>{const m=current[j.motor_id];if(!m)return;const q=(m.position-j.zero_ticks)*j.sign/j.ticks_per_rad;const node=robot?.joints[`rev_motor_0${i+1}`];const outside=node&&(q<node.limit.lower||q>node.limit.upper);$(`read${i}`).textContent=`${m.position} ticks → ${(q*180/Math.PI).toFixed(1)}°${outside?' · OUTSIDE MODEL LIMITS':''}`;$(`read${i}`).className=outside?'bad':'';if(node){node.ignoreLimits=true;robot.setJointValue(node.name,q);}});
+ // Gripper is displayed with its recorded range; it is not part of the 7-axis candidate.
+ const grip=current[8];if(robot&&grip&&grip.range_max>grip.range_min){const f=(grip.position-grip.range_min)/(grip.range_max-grip.range_min);for(const name of ['rev_motor_08','rev_motor_08_1','rev_motor_08_2']){const node=robot.joints[name];if(node){const {lower,upper}=node.limit;robot.setJointValue(name,name.endsWith('_1')?lower+f*(upper-lower):upper-f*(upper-lower));}}}
+}
+async function poll(){try{live=await fetch('/state').then(r=>r.json());$('connection').textContent=$('source').value==='live'?(validLive()?'Live Station · Model only':'STALE / disconnected · Model only'):'Saved pose: '+$('source').value;if($('source').value!=='live'||validLive())renderPose();}catch(e){$('connection').textContent='Telemetry disconnected';}setTimeout(poll,200);}
+$('source').onchange=()=>{invalidateMotion();renderPose();};
+$('reset').onclick=()=>{joints=structuredClone(initial);build();renderPose();};
+$('save').onclick=async()=>{try{const r=await fetch('/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({joints,verified:true})});const data=await r.json();if(!r.ok)throw Error(data.error);$('notice').textContent='Verified calibration saved: '+data.saved+'\nSimulate again to refresh execution checks.';invalidateMotion();}catch(e){$('notice').textContent='Save failed: '+e.message;}};
+for(const [name,pos] of [['front',[0,.3,.8]],['side',[.8,.3,0]],['top',[0,.9,.001]]])$(name).onclick=()=>{camera.position.set(...pos);orbit.update();};
+function invalidateMotion(){if($('deployDialog').open)$('deployDialog').close();motion=null;simulation=null;simulationView=false;$('execute').disabled=true;$('simulate').disabled=false;$('motionProgress').value=0;}
+function askDeployment(){ $('deployReason').textContent=motion.executable?'The configured execution checks passed. Confirm to send this trajectory to the real arm.':'Deployment unavailable: '+motion.reasons.join('; ');$('deployReal').disabled=!motion.executable;$('deployDialog').showModal();}
+$('keepSimulation').onclick=()=>$('deployDialog').close();
+$('deployReal').onclick=()=>{$('deployDialog').close();runRealMotion();};
+$('joints').addEventListener('input',invalidateMotion);$('joints').addEventListener('click',e=>{if(e.target.tagName==='BUTTON')invalidateMotion();});$('motionTarget').onchange=invalidateMotion;$('showLive').onclick=()=>{invalidateMotion();$('source').value='live';renderPose();};$('reset').addEventListener('click',invalidateMotion);
+async function requestMotion(path,body){const response=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const data=await response.json();if(!response.ok)throw Error(data.error??'Request failed');return data;}
+$('simulate').onclick=async()=>{
+ if(!robot||!validLive()){alert('Model and fresh live telemetry required.');return;}
+ invalidateMotion();$('simulate').disabled=true;const started=performance.now();
+ const waiting=setInterval(()=>{$('motionStatus').textContent=`Checking full rover collisions… ${Math.floor((performance.now()-started)/1000)} s. Animation starts after planning completes.`;},500);
+ try{motion=await requestMotion('/motion/preview',{joints,target:$('motionTarget').value});clearInterval(waiting);simulation={start:performance.now(),index:0};simulationView=true;$('motionStatus').textContent=`Simulation running · ${motion.duration.toFixed(1)} s · Gripper unchanged`;}
+ catch(e){clearInterval(waiting);$('motionStatus').textContent='Preview refused: '+e.message;$('simulate').disabled=false;alert('Simulation could not start:\n'+e.message);}
+};
+$('execute').onclick=()=>{if(motion?.executable&&!simulation)askDeployment();};
+async function runRealMotion(){
+ if(!motion?.executable||simulation)return;
+ $('execute').disabled=true;$('simulate').disabled=true;$('deployReal').disabled=true;
+ $('motionStatus').textContent='Deployment request sent; preparing real motion…';
+ const progress=setInterval(async()=>{try{const state=await fetch('/motion/status').then(r=>r.json());$('motionStatus').textContent=state.message;}catch(e){}},750);
+ try{const result=await requestMotion('/motion/execute',{token:motion.token});clearInterval(progress);$('motionStatus').textContent='Real arm: '+result.status;alert('Real arm arrived at the selected pose.');}
+ catch(e){clearInterval(progress);$('motionStatus').textContent='Real motion stopped/refused: '+e.message;alert('Deployment stopped or refused:\n'+e.message);}
+ finally{clearInterval(progress);invalidateMotion();$('source').value='live';renderPose();}
+}
+new ResizeObserver(()=>{const w=viewport.clientWidth,h=viewport.clientHeight;camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setSize(w,h);}).observe(viewport);
+build();poll();renderer.setAnimationLoop(()=>{if(simulation&&motion){const t=(performance.now()-simulation.start)/1000;const rows=motion.samples;while(simulation.index<rows.length-1&&rows[simulation.index+1].t_s<=t)simulation.index++;const a=rows[simulation.index],b=rows[Math.min(simulation.index+1,rows.length-1)],f=b.t_s>a.t_s?Math.min(1,(t-a.t_s)/(b.t_s-a.t_s)):0;for(let i=0;i<7;i++)robot.setJointValue(`rev_motor_0${i+1}`,a.q_rad[i]+f*(b.q_rad[i]-a.q_rad[i]));$('motionProgress').value=Math.min(1,t/motion.duration);if(t>=motion.duration){simulation=null;$('simulate').disabled=false;$('execute').disabled=!motion.executable;$('motionStatus').textContent=motion.executable?'Simulation complete. Review, then validate to move the real arm.':'Simulation complete. Real execution blocked: '+motion.reasons.join('; ');askDeployment();}}orbit.update();renderer.render(scene,camera);});
+</script></html>

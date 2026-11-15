@@ -40,11 +40,26 @@ async def connection(config, sdk, host):
             await asyncio.sleep(0.02)
         else:
             raise RuntimeError('Aucun état Station reçu')
+        await fresh_feedback(station)
         yield station
     finally:
         worker.cancel()
         await asyncio.gather(worker, return_exceptions=True)
         client.close_connection()
+
+
+async def fresh_feedback(station, timeout=3.0):
+    """Yield to the reader after CPU/file work; never relax sample-age checks."""
+    deadline = time.monotonic()+timeout
+    while True:
+        await asyncio.sleep(.02)
+        try:
+            return station.state()
+        except RuntimeError as exc:
+            if 'périm' not in str(exc):
+                raise
+            if time.monotonic() >= deadline:
+                raise RuntimeError('Fresh motor feedback did not resume; no motion started') from exc
 
 
 def measured(station, config, *, powered=False, stationary=False):
@@ -61,12 +76,14 @@ def measured(station, config, *, powered=False, stationary=False):
     return ticks_to_joints(config, [s[0] for s in states])
 
 
-async def execute(station, arm, plan):
+async def execute(station, arm, plan, progress=None, paced=False, command_period=None):
+    progress = progress or (lambda message: None)
+    progress('Checking calibrated targets and quantized collision path')
     c = arm.c
     world = arm.collision
     if world is None or not plan.get('collision_checked'):
         raise ValueError('Exécution refusée sans scène et trajectoire contrôlées pour les collisions')
-    world.require_hardware_ready()
+    await asyncio.to_thread(world.require_hardware_ready)
     # Validate every quantized setpoint BEFORE any write.
     goals = [joints_to_ticks(c, s['q_rad']) for s in plan['samples']]
     for goal in goals:
@@ -75,8 +92,10 @@ async def execute(station, arm, plan):
     for sample, goal in zip(quantized['samples'], goals):
         sample['q_rad'] = ticks_to_joints(c, goal).tolist()
     await asyncio.to_thread(world.validate_plan, quantized)
-    world.require_hardware_ready()
+    await asyncio.to_thread(world.require_hardware_ready)
+    await fresh_feedback(station)
     actual = measured(station, c, powered=True, stationary=True)
+    progress('Checking that the real arm still matches the simulation start')
     previous = np.asarray(plan['samples'][0]['q_rad'])
     if np.max(np.abs(actual-previous)) > 0.02:
         raise RuntimeError('Le bras a bougé pendant le calcul ; recalculer le plan')
@@ -88,13 +107,52 @@ async def execute(station, arm, plan):
     await station.write(0x2e, [c['servo_speed_ticks_s']]*7, 2)
     await station.write(0x29, [c['servo_acceleration']]*7, 1)
     begin = time.monotonic()
-    for sample, goal in zip(plan['samples'], goals):
-        deadline = begin+sample['t_s']
+    progress('Sending trajectory to real arm')
+    commands = list(zip(plan['samples'], goals))
+    if command_period is not None and not .02 <= command_period <= .1:
+        raise ValueError('Invalid command period')
+    if paced or command_period is not None:
+        # Use already validated points, never synthesize shortcuts. The full
+        # path between these points was collision-checked above. Servo speed
+        # and acceleration remain capped; extra checking time becomes a hold.
+        selected = [commands[0]]
+        for command in commands[1:-1]:
+            if command[0]['t_s']-selected[-1][0]['t_s'] >= (.1 if paced else command_period):
+                selected.append(command)
+        if commands[-1] is not selected[-1]:
+            selected.append(commands[-1])
+        commands = selected
+    for index, (sample, goal) in enumerate(commands):
+        if index % 10 == 0:
+            progress(f'Real motion: {index + 1}/{len(commands)} checked targets' + (' · paced mode' if paced else ''))
+        deadline = (time.monotonic()+.1 if paced else begin+sample['t_s'])
         await asyncio.sleep(max(0, deadline-time.monotonic()))
-        if time.monotonic()-deadline > 0.1:
+        if not paced and time.monotonic()-deadline > 0.1:
             raise RuntimeError('Boucle de commande en retard ; arrêt de l’envoi')
+        if paced:
+            await fresh_feedback(station)
         actual = measured(station, c, powered=True)
-        world.require_pose(actual, 'Position mesurée')
+        if paced:
+            for attempt in range(3):
+                checked = actual.copy()
+                await asyncio.to_thread(world.require_pose, checked, 'Position mesurée')
+                await fresh_feedback(station)
+                actual = measured(station, c, powered=True)
+                if np.max(np.abs(actual-checked)) <= .005:
+                    break
+            else:
+                raise RuntimeError('Arm moving during collision check; stopped advancing targets')
+            # Validate the actual-to-next edge, not only the nominal path.
+            target = ticks_to_joints(c, goal)
+            if not await asyncio.to_thread(world.motion_valid, actual, target):
+                raise RuntimeError('Measured-to-target segment in collision')
+            await fresh_feedback(station)
+            latest = measured(station, c, powered=True)
+            if np.max(np.abs(latest-actual)) > .005:
+                raise RuntimeError('Arm moved while validating next step; replan required')
+            actual = latest
+        else:
+            world.require_pose(actual, 'Position mesurée')
         if np.max(np.abs(actual-previous)) > c['tracking_error_rad']:
             raise RuntimeError('Erreur de suivi excessive ; arrêt de l’envoi')
         await station.write(0x2a, goal, 2)
@@ -102,6 +160,7 @@ async def execute(station, arm, plan):
     # Check real arrival rather than declaring success after the last send.
     final = np.asarray(plan['samples'][-1]['q_rad'])
     timeout = time.monotonic()+3
+    progress('Verifying final arrival')
     while time.monotonic() < timeout:
         q = measured(station, c, powered=True)
         if np.max(np.abs(q-final)) > c['tracking_error_rad']:

@@ -14,6 +14,13 @@ JOINTS = [f'rev_motor_{i:02d}' for i in range(1, 8)]
 TICKS_PER_RAD = 4096 / (2 * math.pi)
 
 
+def joint_scale(joint):
+    scale = joint.get('ticks_per_rad', TICKS_PER_RAD)
+    if not math.isfinite(scale) or not 100 <= scale <= 5000:
+        raise ValueError('Échelle articulaire invalide')
+    return scale
+
+
 def vector(value, size, label):
     a = np.asarray(value, dtype=float)
     if a.shape != (size,) or not np.all(np.isfinite(a)):
@@ -41,7 +48,7 @@ def load_config(path):
     if (type(c['servo_speed_ticks_s']) is not int or not 1 <= c['servo_speed_ticks_s'] <= 3400
             or type(c['servo_acceleration']) is not int or not 1 <= c['servo_acceleration'] <= 254):
         raise ValueError('Vitesse/accélération servo invalides')
-    if c['max_velocity_rad_s'] * TICKS_PER_RAD > c['servo_speed_ticks_s']:
+    if c['max_velocity_rad_s'] * max(joint_scale(j) for j in c['joints']) > c['servo_speed_ticks_s']:
         raise ValueError('La limite de vitesse servo est inférieure à celle du plan')
     return c
 
@@ -50,6 +57,8 @@ def require_calibration(c):
     if c.get('hardware_verified') is not True or not c.get('bus') or c['bus'] == 'auto':
         raise ValueError('Mapping matériel vérifié et numéro de bus explicite requis')
     for j in c['joints']:
+        if c['max_velocity_rad_s'] * joint_scale(j) > c['servo_speed_ticks_s']:
+            raise ValueError('Échelle incompatible avec la vitesse servo')
         if (j['sign'] not in (-1, 1) or type(j['sign']) is not int
                 or any(type(j[k]) is not int for k in ('zero_ticks', 'min_ticks', 'max_ticks'))
                 or not 0 <= j['zero_ticks'] <= 4095
@@ -63,14 +72,14 @@ def ticks_to_joints(c, ticks):
     if any(not j['min_ticks'] <= p <= j['max_ticks'] for j, p in zip(c['joints'], ticks)):
         raise ValueError('Position encodeur hors de la plage configurée')
     # No modulo or guessed midpoint: mapping is continuous on a non-wrapping arc.
-    return np.array([(p-j['zero_ticks']) * j['sign'] / TICKS_PER_RAD
+    return np.array([(p-j['zero_ticks']) * j['sign'] / joint_scale(j)
                      for j, p in zip(c['joints'], ticks)])
 
 
 def joints_to_ticks(c, q):
     require_calibration(c)
     q = vector(q, 7, 'joints')
-    ticks = [round(j['zero_ticks'] + j['sign'] * angle * TICKS_PER_RAD)
+    ticks = [round(j['zero_ticks'] + j['sign'] * angle * joint_scale(j))
              for j, angle in zip(c['joints'], q)]
     if any(not j['min_ticks'] <= p <= j['max_ticks'] for j, p in zip(c['joints'], ticks)):
         raise ValueError('Consigne hors calibration : refus, sans écrêtage')
@@ -102,7 +111,7 @@ class Arm:
         if config.get('hardware_verified'):
             require_calibration(config)
             for i, j in enumerate(config['joints']):
-                ends = sorted((p-j['zero_ticks']) * j['sign'] / TICKS_PER_RAD
+                ends = sorted((p-j['zero_ticks']) * j['sign'] / joint_scale(j)
                               for p in (j['min_ticks'], j['max_ticks']))
                 self.bounds[i] = [max(self.bounds[i, 0], ends[0]), min(self.bounds[i, 1], ends[1])]
         if not np.all(np.isfinite(self.bounds)) or np.any(self.bounds[:, 0] >= self.bounds[:, 1]):

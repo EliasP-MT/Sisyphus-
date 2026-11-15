@@ -18,6 +18,7 @@ Usage:
     python3 teleop.py start             # Ctrl+C stops (follower goes limp!)
     python3 teleop.py start --detach    # leave mirroring running in the station
     python3 teleop.py stop
+    python3 teleop.py spin --bus BUS_SERIAL --speed 500
 
 Only the Python standard library is needed. The station must run with --tcp
 (port 8888); the web UI on :8889 keeps working alongside this tool.
@@ -56,6 +57,8 @@ REG_GOAL_SPEED = 0x2E
 REG_PRESENT_POSITION = 0x38
 REG_STATUS = 0x40
 REG_PRESENT_CURRENT = 0x45
+REG_OPERATING_MODE = 0x21       # EEPROM: 0=position, 1=wheel
+EXTRA_SERVO_ID = 10
 
 MAX_STEPS = 4096
 # Must match the station's mirroring (software/drivers/motors-mirroring/src/config.rs)
@@ -269,6 +272,24 @@ class Station:
             self._sync_write(bus, REG_ACC, [(i, bytes([accel])) for i in ids]),
             self._sync_write(bus, REG_GOAL_POSITION, [(i, g.to_bytes(2, "little")) for i, g in goals.items()]),
         ])
+
+    async def spin(self, bus: str, speed: int):
+        """Run the extra STS3215 indefinitely in wheel mode.
+
+        STS3215 wheel-mode speed is unsigned magnitude plus bit 15 for
+        direction.  Torque must be off while changing the EEPROM mode.
+        """
+        if not -1000 <= speed <= 1000:
+            raise ValueError("spin speed must be between -1000 and 1000")
+        await self.set_torque(bus, [EXTRA_SERVO_ID], False)
+        await self._send([self._sync_write(
+            bus, REG_OPERATING_MODE, [(EXTRA_SERVO_ID, bytes([1]))]
+        )])
+        raw_speed = abs(speed) | (0x8000 if speed < 0 else 0)
+        await self._send([self._sync_write(
+            bus, REG_GOAL_SPEED, [(EXTRA_SERVO_ID, raw_speed.to_bytes(2, "little"))]
+        )])
+        await self.set_torque(bus, [EXTRA_SERVO_ID], True)
 
     async def _mirror_cmd(self, ctype, source: str, targets: list[str] = ()):
         bus = lambda s: mirroring.MirroringBus(type=mirroring.BusType.MBT_ST3215, unique_id=s)  # noqa: E731
@@ -550,14 +571,23 @@ def main():
     s = sub.add_parser("stop", help="stop mirroring")
     s.add_argument("--leader", help="source bus to stop (default: whatever is active)")
 
+    s = sub.add_parser("spin", help="run extra servo 10 continuously in wheel mode")
+    s.add_argument("--bus", required=True, help="ST3215 bus serial")
+    s.add_argument("--speed", type=int, required=True,
+                   help="speed -1000..1000; negative reverses direction, zero stops")
+
     args = p.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
     async def run():
         st = await Station.connect(args.host)
-        await {"status": cmd_status, "identify": cmd_identify,
-               "start": cmd_start, "stop": cmd_stop}[args.cmd](st, args)
+        if args.cmd == "spin":
+            await st.spin(args.bus, args.speed)
+            print(f"Servo {EXTRA_SERVO_ID} wheel mode: speed {args.speed}")
+        else:
+            await {"status": cmd_status, "identify": cmd_identify,
+                   "start": cmd_start, "stop": cmd_stop}[args.cmd](st, args)
 
     try:
         asyncio.run(run())
