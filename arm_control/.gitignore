@@ -2,11 +2,8 @@
 .pip.pyz
 .sdk/
 *.local.json
-<<<<<<< HEAD
 *.local.png
 /assets/full_robot_box_complete_collision/
 /assets/rover-fixed.local/
 /runtime.local/
 *.tar.gz
-=======
->>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f

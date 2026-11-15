@@ -142,7 +142,6 @@ et leur discrétisation ne garantissent pas le jerk réel. Les tolérances de
 mesurée. Le programme arrête les envois sur erreur et conserve le dernier
 objectif/couple : ce dernier petit déplacement peut finir ; une perte réseau
 ne garantit pas un arrêt physique. Aucun essai sur le robot n’a été effectué.
-<<<<<<< HEAD
 # Interactive model calibration
 
 Keep Station and the laptop TCP tunnel on port 18888 running, then launch:
@@ -245,5 +244,3 @@ Validated proxies with measured p95 check time below half the command interval
 use streamed execution at a 60 ms interval, selecting existing checked samples
 and keeping the exact endpoint. Unvalidated/slower scenes use paced mode.
 The original 100 ms lateness guard is retained; no automatic physical retry occurs.
-=======
->>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f

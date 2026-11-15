@@ -75,7 +75,7 @@ class Station:
             if not m.get_range_freezed() or not 0 <= lo < hi <= 4095:
                 raise RuntimeError(f'Moteur {mid} : calibration figée requise dans Station')
             error = m.get_error()
-            if (len(raw) < 0x41 or raw[0x40] or error.get_description()
+            if (len(raw) < 0x42 or raw[0x41] or error.get_description()
                     or error.get_servo() or error.get_command_packet()):
                 raise RuntimeError(f'Moteur {mid} : état incomplet ou erreur servo')
             value = int.from_bytes(raw[0x38:0x3a], 'little')

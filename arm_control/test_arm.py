@@ -34,7 +34,7 @@ class FakeMotor:
         self.raw[0x28] = torque
         self.raw[0x38:0x3a] = ticks.to_bytes(2, 'little')
         self.raw[0x3a:0x3c] = speed.to_bytes(2, 'little')
-        self.raw[0x40] = int(error)
+        self.raw[0x41] = int(error)
         self.stale = stale
 
     def get_state(self): return self.raw
@@ -232,7 +232,6 @@ class ModelTests(unittest.TestCase):
             plan['samples'][-1]['q_rad'] = [20]*7
             with self.assertRaises(ValueError): asyncio.run(execute(fake_station(c), arm, plan))
 
-<<<<<<< HEAD
     def test_paced_executor_handles_slow_checks_without_catchup(self):
         c = calibration()
         arm = Arm(URDF, c)
@@ -271,8 +270,6 @@ class ModelTests(unittest.TestCase):
             self.assertEqual(s.writes[-1][0],0x2a)
             self.assertEqual(s.writes[-1][1],joints_to_ticks(c,plan['samples'][-1]['q_rad']))
 
-=======
->>>>>>> c7f5f6d43191d10c399e902fd80602706620a26f
 
 if __name__ == '__main__':
     unittest.main()
