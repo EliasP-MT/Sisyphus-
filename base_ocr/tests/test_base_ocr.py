@@ -1,13 +1,10 @@
-import sys
-import time
 import unittest
 from unittest.mock import Mock, patch
 
 import cv2
 import numpy as np
 
-from ocr_base import BaseOCR, _recipient_name, main
-from ocr_preview import _process_frame
+from ocr_base import _first_line, _known_name, read_recipient_name
 
 
 def result(*items):
@@ -18,85 +15,55 @@ def result(*items):
     )
 
 
-def reader(**kwargs):
-    engine = Mock()
-    with patch.dict(sys.modules, {"paddleocr": Mock(PaddleOCR=Mock(return_value=engine))}):
-        instance = BaseOCR(**kwargs)
-    return instance, engine
-
-
 class BaseTests(unittest.TestCase):
-    def test_select_recipient_over_sender_and_unrelated_text(self):
-        raw = result(
-            ("Sender", 10, 20, 80),
-            ("1 rue Victor Hugo", 10, 40, 150),
-            ("69001 Lyon", 10, 60, 110),
-            ("Jane Doe", 300, 200, 110),
-            ("12 Main Street", 300, 220, 150),
-            ("Boston MA 02110", 300, 240, 150),
-        )
-        self.assertEqual(_recipient_name(raw, 640, 480), "Jane Doe")
-        self.assertEqual(_recipient_name(result(), 640, 480), "")
-
-    def test_unchanged_full_frame_and_string_return(self):
-        instance, engine = reader(max_seconds=10)
-        frame = np.zeros((480, 640, 3), np.uint8)
-        engine.predict.return_value = [
-            result(
-                ("Jane Doe", 100, 100, 100),
-                ("12 Main Street", 100, 120, 140),
-                ("Boston MA 02110", 100, 140, 150),
-            )
-        ]
-        self.assertEqual(instance.read_name(frame), "Jane Doe")
-        self.assertIs(engine.predict.call_args.args[0], frame)
-        instance.close()
-
-    def test_mac_camera_stays_open_and_is_released(self):
-        instance, engine = reader(target="mac", device="0", max_seconds=10)
-        engine.predict.return_value = []
+    def test_only_sixth_frame_is_processed_and_camera_released(self):
+        frames = [np.full((480, 640, 3), i, np.uint8) for i in range(6)]
         camera = Mock()
-
-        def capture():
-            time.sleep(0.002)
-            return True, np.zeros((480, 640, 3), np.uint8)
-
-        camera.read.side_effect = capture
-        with patch.object(cv2, "VideoCapture", return_value=camera) as factory:
-            try:
-                instance.read_name()
-                instance.read_name()
-                factory.assert_called_once_with(0, cv2.CAP_AVFOUNDATION)
-                camera.release.assert_not_called()
-            finally:
-                instance.close()
+        camera.read.side_effect = [(True, f) for f in frames]
+        engine = Mock()
+        engine.predict.return_value = [
+            result(("Jan", 10, 20, 30), ("Smith", 48, 20, 45), ("Anna Berg", 10, 100, 100))
+        ]
+        with (
+            patch.object(cv2, "VideoCapture", return_value=camera) as factory,
+            patch("ocr_base._engine", return_value=engine),
+        ):
+            self.assertEqual(read_recipient_name(target="mac", device=0), "Jan Smith")
+        factory.assert_called_once_with(0, cv2.CAP_AVFOUNDATION)
+        self.assertEqual(camera.read.call_count, 6)
+        self.assertIs(engine.predict.call_args.args[0], frames[5])
         camera.release.assert_called_once()
 
-    def test_preview_shows_slow_result_without_mutating_input(self):
-        instance, engine = reader()
-        instance.last_frame = np.zeros((100, 160, 3), np.uint8)
-        instance.last_result = result(("Jane Doe", 10, 30, 100))
-        instance.last_name = "Jane Doe"
-        instance.last_timings = {"ocr_s": 2.0, "total_s": 2.01}
-        instance.last_elapsed_seconds = 2.01
-        with patch.object(instance, "read_name", side_effect=TimeoutError()):
-            jpeg, status = _process_frame(instance)
-        self.assertTrue(jpeg.startswith(b"\xff\xd8"))
-        self.assertTrue(status["over_budget"])
-        self.assertEqual(status["recipient_name"], "Jane Doe")
-        self.assertFalse(instance.last_frame.any())
+    def test_failure_does_not_process_an_earlier_frame(self):
+        camera = Mock()
+        camera.read.side_effect = [(True, np.zeros((10, 10, 3), np.uint8))] * 5 + [(False, None)]
+        with (
+            patch.object(cv2, "VideoCapture", return_value=camera),
+            patch("ocr_base._engine") as engine,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "frame 6"):
+                read_recipient_name()
+        engine.assert_not_called()
+        camera.release.assert_called_once()
 
-    def test_robot_is_default_and_preview_opt_in(self):
-        for args, visual in [([], False), (["--target", "mac", "--device", "0", "--test"], True)]:
-            with (
-                patch("ocr_base.BaseOCR") as factory,
-                patch("ocr_preview.run_preview") as preview,
-                patch("builtins.print"),
-            ):
-                main(args)
-                if visual:
-                    factory.assert_called_once_with(device="0", target="mac")
-                    preview.assert_called_once()
-                else:
-                    factory.assert_called_once_with(device=None, target="robot")
-                    preview.assert_not_called()
+    def test_geometric_first_line_and_separate_words(self):
+        raw = result(("Anna Berg", 10, 120, 100), ("Smith", 48, 20, 45), ("Jan", 10, 20, 30))
+        self.assertEqual(_first_line(raw), "Jan Smith")
+
+    def test_unknown_first_line_never_falls_back_to_known_second(self):
+        line = _first_line(result(("POSTAGE", 10, 10, 100), ("Jan Smith", 10, 100, 100)))
+        self.assertEqual(_known_name(line, ["Jan Smith", "Anna Berg"]), "")
+
+    def test_separate_text_on_same_row_is_not_joined(self):
+        self.assertEqual(
+            _first_line(result(("Jan", 10, 20, 30), ("Smith", 48, 20, 45), ("Other", 300, 20, 80))),
+            "Jan Smith",
+        )
+
+    def test_empty_uncertain_and_tied_match(self):
+        self.assertEqual(_first_line(result()), "")
+        raw = result(("Jan Smith", 10, 20, 100))
+        raw["rec_scores"] = [0.1]
+        self.assertEqual(_first_line(raw), "")
+        self.assertEqual(_known_name("Jan Smith", ["Jan Smith", "Jan Smyth"]), "Jan Smith")
+        self.assertEqual(_known_name("Jan Smit", ["Jan Smith", "Jan Smitz"]), "")
