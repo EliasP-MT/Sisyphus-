@@ -205,7 +205,9 @@ class Station(Node):
         if path == '/api/execute':
             return self.execute(str(body['plan_id']), bool(body.get('include_gripper')))
         if path == '/api/task/plan':
-            return self.tasks.prepare(str(body['task']), float(body.get('speed_factor', 1.)))
+            return self.tasks.prepare(str(body['task']), float(body.get('speed_factor', 1.)), int(body.get('ocr_camera', 1)))
+        if path == '/api/task/ocr':
+            return self.tasks.read_now(int(body.get('camera', 1)))
         if path == '/api/task/start':
             return self.tasks.start()
         if path == '/api/task/stop':
@@ -277,6 +279,11 @@ def make_handler(station):
                 return self.send(200, station.page.replace('__TOKEN__', station.token).encode(),
                                  'text/html; charset=utf-8')
             params = dict(p.partition('=')[::2] for p in query.split('&') if p)
+            if path == '/ocr_frame.jpg':
+                frame = getattr(station.tasks, 'last_frame', None)
+                if not self.authorized(params.get('token')) or frame is None:
+                    return self.send(404, {'error': 'no frame'})
+                return self.send(200, frame, 'image/jpeg')
             if path.startswith('/camera/') and path.endswith('.mjpg'):
                 if not self.authorized(params.get('token')):
                     return self.send(403, {'error': 'token required'})

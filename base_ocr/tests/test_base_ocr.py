@@ -60,6 +60,36 @@ class BaseTests(unittest.TestCase):
             "Jan Smith",
         )
 
+    def test_tilted_text_is_grouped_along_its_direction(self):
+        import math
+
+        def tilt(item, angle):
+            c, s_ = math.cos(angle), math.sin(angle)
+            return [[x * c - y * s_, x * s_ + y * c] for x, y in item]
+
+        raw = result(("Anna Berg", 10, 120, 100), ("Smith", 48, 20, 45), ("Jan", 10, 20, 30))
+        for angle in (0.61, -0.61, 0.3):  # up to about +-35 degrees
+            raw["rec_polys"] = [tilt(p, angle) for p in result(
+                ("Anna Berg", 10, 120, 100), ("Smith", 48, 20, 45), ("Jan", 10, 20, 30))["rec_polys"]]
+            self.assertEqual(_first_line(raw), "Jan Smith", angle)
+
+    def test_tilt_search_goes_0_then_plus_minus_5_10_to_35(self):
+        frame = np.zeros((100, 200, 3), np.uint8)
+        engine = Mock()
+        engine.predict.return_value = [result(("Unknown", 10, 20, 100))]
+        with patch("ocr_base._engine", return_value=engine):
+            self.assertEqual(read_recipient_name(frame=frame), "")
+        self.assertEqual(engine.predict.call_count, 15)
+        self.assertIs(engine.predict.call_args_list[0].args[0], frame)
+
+    def test_search_stops_at_the_first_angle_that_reads_a_name(self):
+        frame = np.zeros((100, 200, 3), np.uint8)
+        engine = Mock()
+        engine.predict.side_effect = [[result()], [result()], [result()], [result(("Jan Smith", 10, 20, 100))]]
+        with patch("ocr_base._engine", return_value=engine):
+            self.assertEqual(read_recipient_name(frame=frame), "Jan Smith")
+        self.assertEqual(engine.predict.call_count, 4)  # 0, +5, -5, +10 degrees
+
     def test_empty_uncertain_and_tied_match(self):
         self.assertEqual(_first_line(result()), "")
         raw = result(("Jan Smith", 10, 20, 100))

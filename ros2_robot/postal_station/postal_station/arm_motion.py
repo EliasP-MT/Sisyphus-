@@ -100,7 +100,11 @@ class ArmMotion(Node):
     def planner_ids(self):
         """Scene + calibration identity of the planner worker (cache validity)."""
         if time.monotonic() - self.ids_time > 30:
-            st = json.load(urllib.request.urlopen(self.url + '/status', timeout=3))
+            try:
+                st = json.load(urllib.request.urlopen(self.url + '/status', timeout=3))
+            except OSError as exc:
+                raise RuntimeError('Planner worker is not running (check ros2_robot/.station_ws/planner.log; '
+                                   f'a missing CAD file, e.g. an unplugged USB drive, stops it): {exc}') from exc
             self.ids = f"{st.get('scene_sha256')}|{st.get('calibration_sha256')}"
             self.ids_time = time.monotonic()
         return self.ids

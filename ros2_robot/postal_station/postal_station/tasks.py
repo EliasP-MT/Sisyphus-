@@ -6,10 +6,15 @@ arm pose, every following leg from the previous stored pose (fixed legs, cached 
 arm_motion). Execution then only chains already collision-checked plans; any
 failure stops the dispenser, cancels the arm goal and leaves the arm held where it
 is. Nothing resumes by itself."""
+import base64
+import json
 import threading
 import time
+import urllib.request
 
 PLAN_LIFETIME_S = 600.
+OCR_URL = 'http://127.0.0.1:8894'
+OCR_SKIP_FRAMES = 5   # as ocr_base.read_recipient_name: discard five frames, read the sixth
 
 # kind 'leg': go to pose (optionally with a gripper/dispenser side action started with it)
 # kind 'gripper': move the gripper and wait for it to settle
@@ -23,7 +28,8 @@ TASKS = {
             {'kind': 'gripper', 'ticks': 1270, 'label': 'Close gripper to 1270'},
             {'kind': 'leg', 'pose': 'pull', 'arrival_tol': .05, 'label': 'Go to pull'},
             {'kind': 'leg', 'pose': 'up_after_pull', 'arrival_tol': .05, 'label': 'Go to up_after_pull'},
-            {'kind': 'leg', 'pose': 'read_card', 'arrival_tol': .04, 'label': 'Go to read_card (stop)'},
+            {'kind': 'leg', 'pose': 'read_card', 'arrival_tol': .04, 'label': 'Go to read_card'},
+            {'kind': 'ocr', 'label': 'Read the name on the card (OCR, one frame)'},
         ],
     },
 }
@@ -43,6 +49,8 @@ class TaskRunner:
 
     def reset(self, task=None):
         self.task, self.phase, self.message = task, 'idle', ''
+        self.ocr_camera = getattr(self, 'ocr_camera', 1)
+        self.ocr = getattr(self, 'ocr', None)
         self.steps, self.plans, self.prepared_at = [], {}, 0.
         self.current = -1
 
@@ -52,7 +60,7 @@ class TaskRunner:
             return {'task': self.task, 'phase': self.phase, 'message': self.message, 'current': self.current,
                     'steps': [dict(st) for st in self.steps], 'prepared_age_s': time.monotonic() - self.prepared_at
                     if self.prepared_at else None,
-                    'tasks': {k: v['title'] for k, v in TASKS.items()}}
+                    'tasks': {k: v['title'] for k, v in TASKS.items()}, 'ocr': self.ocr}
 
     def _set(self, **kw):
         with self.lock:
@@ -67,7 +75,7 @@ class TaskRunner:
         return self.thread is not None and self.thread.is_alive()
 
     # ------------------------------------------------------------------ API
-    def prepare(self, name, speed):
+    def prepare(self, name, speed, ocr_camera=1):
         if name not in TASKS:
             raise KeyError(f'unknown task {name}')
         if self.busy():
@@ -75,7 +83,9 @@ class TaskRunner:
         if self.s.go_handle is not None and self.s.go_result is None:
             return {'success': False, 'message': 'An arm motion is running'}
         self.cancel = False
+        ocr = self.ocr
         self.reset(name)
+        self.ocr, self.ocr_camera = ocr, int(ocr_camera) if int(ocr_camera) in self.s.cameras else 1
         self.steps = [{'label': st['label'], 'status': 'pending', 'detail': ''} for st in TASKS[name]['steps']]
         self.phase = 'planning'
         self.thread = threading.Thread(target=self._prepare, args=(name, speed), daemon=True)
@@ -167,6 +177,48 @@ class TaskRunner:
             raise RuntimeError(f'gripper did not reach {target} ticks within {timeout:.0f} s (now {self._gripper_ticks()})')
         return self._gripper_ticks()
 
+    # ------------------------------------------------------------------ OCR
+    def grab_frame(self, camera):
+        """One JPEG frame: the sixth new frame received now (the first five let exposure settle)."""
+        cam = self.s.cameras[camera]
+        with cam.cond:
+            base = cam.count
+            if not cam.cond.wait_for(lambda: cam.count >= base + 1 + OCR_SKIP_FRAMES, timeout=8.):
+                raise RuntimeError(f'camera {camera} delivered no fresh frames (stream stalled?)')
+            return cam.jpeg
+
+    def read_card(self, camera=None):
+        """Read the recipient name from one fresh camera frame (base_ocr read_recipient_name)."""
+        camera = camera or self.ocr_camera
+        try:
+            status = json.load(urllib.request.urlopen(OCR_URL + '/status', timeout=3))
+            if not status['ready']:
+                raise RuntimeError(status['reason'] or 'OCR model still loading, try again in a moment')
+            jpeg = self.grab_frame(camera)
+            self.last_frame = jpeg
+            req = urllib.request.Request(OCR_URL + '/read', json.dumps({'jpeg_b64': base64.b64encode(jpeg).decode()}).encode(),
+                                         {'Content-Type': 'application/json'})
+            r = json.load(urllib.request.urlopen(req, timeout=120))
+            if not r['success']:
+                raise RuntimeError(r['message'])
+            self.ocr = {'success': True, 'name': r['name'], 'seconds': r['seconds'], 'camera': camera,
+                        'time': time.time(), 'frame_id': int(time.time() * 1000)}
+            return f'name: {r["name"]}' if r['name'] else 'no known name read (empty, uncertain or ambiguous)'
+        except Exception as exc:
+            self.ocr = {'success': False, 'name': '', 'message': str(exc), 'camera': camera, 'time': time.time(),
+                        'frame_id': int(time.time() * 1000) if getattr(self, 'last_frame', None) else 0}
+            return f'OCR failed: {exc}'
+
+    def read_now(self, camera):
+        if self.busy():
+            return {'success': False, 'message': 'A task is running'}
+        self.thread = threading.Thread(target=self._read_now, args=(int(camera),), daemon=True)
+        self.thread.start()
+        return {'success': True, 'message': 'Reading one frame'}
+
+    def _read_now(self, camera):
+        self.read_card(camera if camera in self.s.cameras else 1)
+
     def _call_ok(self, service, **fields):
         r = self.s.call(service, **fields)
         if not r.success:
@@ -216,12 +268,18 @@ class TaskRunner:
                     if st.get('gripper_open'):  # never go on to grab with a closed gripper
                         pos = self._wait_gripper(st['gripper_open'], 15, 10., True)
                         detail += f'; gripper open at {pos}'
+                elif st['kind'] == 'ocr':
+                    detail = self.read_card()
                 else:
                     self._call_ok('gripper', ticks=int(st['ticks']))
                     pos = self._wait_gripper(st['ticks'], 15, 6., False)
                     detail = f'gripper at {pos} ticks' + ('' if abs(pos - st['ticks']) <= 15 else ' (stopped before target: holding the letter?)')
-                self._step(i, status='ok', detail=detail)
-            self._set(phase='done', message='Task finished at read_card', current=len(steps))
+                self._step(i, status='failed' if (st['kind'] == 'ocr' and not (self.ocr or {}).get('success')) else 'ok',
+                           detail=detail)
+            ocr = self.ocr or {}
+            self._set(phase='done', current=len(steps),
+                      message='Task finished at read_card' + (f'; card name: {ocr["name"]}' if ocr.get('name')
+                                                              else '; no known name read' if ocr.get('success') else '; OCR failed'))
         except Exception as exc:
             self._safe_stop()
             if 0 <= self.current < len(self.steps):
