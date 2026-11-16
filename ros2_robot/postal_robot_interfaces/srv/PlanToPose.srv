@@ -9,6 +9,7 @@ float64 start_tolerance_rad
 float64 accel_factor           # 0 = 1.0 (calibrated). Torque peaks come from acceleration, not from speed
 float64 jerk_factor            # 0 = 1.0 (calibrated)
 bool skip_compensation          # transit pose: accept the arrival once settled (no static-error correction steps)
+float64[] line_delta_m          # 3 values: instead of a goal pose, a STRAIGHT line of the TCP by this vector (base_link, m) from the start configuration; goal_ticks and the pose name are then only labels
 float64 speed_factor        # scales calibrated velocity/acceleration/jerk; 0 = 1.0
 ---
 bool success
@@ -19,3 +20,4 @@ string[] reasons            # why the plan is not executable (empty when executa
 float64 duration_s
 string collision_scene_sha256
 trajectory_msgs/JointTrajectory trajectory
+int32[] end_ticks                 # the 7 arm ticks the plan ends at (the goal pose, or the end of a line)

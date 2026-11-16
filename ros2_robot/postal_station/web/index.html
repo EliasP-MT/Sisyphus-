@@ -54,12 +54,16 @@ progress{width:100%}.banner{padding:8px 10px;border-radius:6px;margin:4px 0}.ban
     <div><div class="muted">Name read on the card</div><div id="ocrName" style="font-size:22px;font-weight:700"></div><div id="ocrInfo" class="muted"></div></div></div>
   <div class="row" id="taskParams" hidden>Recipient <input type="text" id="insRecipient" list="insNames" placeholder="name on the mailbox" style="width:12em"><datalist id="insNames"></datalist>
     Front <input type="number" id="insFront" value="10" min="3" max="40" step="1" style="width:4.5em"> cm
-    Left offset <input type="number" id="insLeft" value="3" min="-10" max="10" step="0.5" style="width:4.5em"> cm
+    Left offset <input type="number" id="insLeft" value="1" min="-10" max="10" step="0.5" style="width:4.5em"> cm
     Depth inside <input type="number" id="insDepth" value="5" min="0" max="15" step="1" style="width:4.5em"> cm
     Fingertips <input type="number" id="insTcp" value="10.6" min="0" max="20" step="0.1" style="width:4.5em"> cm
     Pivot J7 <select id="insPivot"><option value="90" selected>+90°</option><option value="-90">−90°</option></select>
-    <span class="muted">from the scan orientation; the arm must be at <b>scan</b> (gripper closed)</span></div>
+    Letters <input type="number" id="insLetters" value="3" min="1" max="6" step="1" style="width:3.5em"> <span class="muted">(deliver_all)</span>
+    Base forward <input type="number" id="insApproach" value="20" min="0" max="50" step="1" style="width:4em"> cm
+    back <input type="number" id="insRetreat" value="20" min="0" max="50" step="1" style="width:4em"> cm
+    <span class="muted">from the scan orientation; the arm must be at <b>scan</b> (gripper closed). pick_deliver / deliver_all drive the base forward while the arm returns to scan with the letter, and back after the drop (0 = stay). deliver_all first photographs the mailboxes, then repeats pick, read, insert for each letter.</span></div>
   <div id="taskMsg" class="muted"></div>
+  <div id="missionBox" class="muted" hidden style="margin:4px 0"></div>
   <ol id="taskSteps" style="margin:6px 0;padding-left:22px"></ol>
   <div class="muted">Plan covers the whole sequence before anything moves (first leg from the current pose, the others between stored poses). Start only runs the precomputed plans; any failure stops the dispenser and holds the arm.</div>
 </section>
@@ -243,8 +247,17 @@ function render() {
   renderSlam(s.slam);
   renderDetect(s.detect);
 }
+const INSERT_TASKS = ['insert_letter', 'pick_deliver', 'deliver_all'];
+function renderMission(t) {
+  const m = t.mailboxes || [], l = t.letters || [], box = $('missionBox');
+  box.hidden = !(m.length || l.length);
+  box.innerHTML = `<b>State</b> ${esc((t.fsm && t.fsm.state) || '')}${t.fsm && t.fsm.letter ? ' · letter ' + t.fsm.letter : ''}` +
+    (m.length ? '<br><b>Mailboxes</b> ' + m.map(b => esc(b.name) + (b.slot_base_m ? ` (slot ${b.slot_base_m.map(v => Math.round(v * 100)).join(', ')} cm)` : ' (no slot position)')).join(' · ') : '') +
+    (l.length ? '<br><b>Letters</b> ' + l.map(x => `#${x.letter} ${esc(x.name || '?')} — ${esc(x.status)}`).join(' · ') : '');
+}
 function renderTask(t) {
   if (!t) return;
+  renderMission(t);
   renderOcr(t.ocr);
   const sel = $('taskSel');
   if (!sel.options.length) for (const [k, v] of Object.entries(t.tasks)) sel.add(new Option(v, k));
@@ -256,7 +269,7 @@ function renderTask(t) {
   $('taskMsg').innerHTML = `<b class="${{ready: 'ok', done: 'ok', failed: 'bad', canceled: 'bad'}[t.phase] || ''}">${esc(t.phase)}</b> ${esc(t.message)}` +
     (t.phase === 'ready' && t.prepared_age_s !== null ? ` <span class="muted">(planned ${Math.round(t.prepared_age_s)} s ago, valid 10 min)</span>` : '');
   $('taskPlan').disabled = busy;
-  $('taskParams').hidden = !['insert_letter', 'pick_deliver'].includes($('taskSel').value);
+  $('taskParams').hidden = !INSERT_TASKS.includes($('taskSel').value);
   if (document.activeElement !== $('insRecipient')) { const names = (state && state.detect ? state.detect.labels : []).map(l => l.name).filter(Boolean); $('insNames').innerHTML = names.map(n => `<option value="${esc(n)}">`).join(''); }
   $('taskPlan').textContent = t.phase === 'failed' || t.phase === 'canceled' ? 'Retry plan' : 'Plan';
   $('taskSpeedIn').disabled = busy;
@@ -403,11 +416,12 @@ async function loadPoses() {
 }
 
 function taskParams() {
-  if (!['insert_letter', 'pick_deliver'].includes($('taskSel').value)) return {};
+  if (!INSERT_TASKS.includes($('taskSel').value)) return {};
   return {recipient: $('insRecipient').value, front_cm: parseFloat($('insFront').value), depth_cm: parseFloat($('insDepth').value), left_cm: parseFloat($('insLeft').value),
-          tcp_offset_cm: parseFloat($('insTcp').value), pivot_deg: parseFloat($('insPivot').value)};
+          tcp_offset_cm: parseFloat($('insTcp').value), pivot_deg: parseFloat($('insPivot').value),
+          letters: parseInt($('insLetters').value), approach_cm: parseFloat($('insApproach').value), retreat_cm: parseFloat($('insRetreat').value)};
 }
-$('taskSel').onchange = () => { $('taskParams').hidden = !['insert_letter', 'pick_deliver'].includes($('taskSel').value); };
+$('taskSel').onchange = () => { $('taskParams').hidden = !INSERT_TASKS.includes($('taskSel').value); };
 $('taskPlan').onclick = () => act('/api/task/plan', {task: $('taskSel').value, speed_factor: parseFloat($('taskSpeedIn').value) || 1, ocr_camera: parseInt($('ocrCam').value), params: taskParams()}, 'task plan', 150000);
 $('ocrNow').onclick = () => act('/api/task/ocr', {camera: parseInt($('ocrCam').value)}, 'read card', 130000);
 $('taskStart').onclick = () => act('/api/task/start', {}, 'task start');

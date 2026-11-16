@@ -29,10 +29,11 @@
     start_tolerance_rad: 0.02
     arrival_tolerance_rad: 0.01
     arrival_timeout_s: 20.0
-    overload_load_raw: 200          # servo overload threshold (raw load); the arm slows down before it, 0 = off
+    overload_load_raw: 400          # guard threshold (raw load); the arm slows from 65 % and is held at 92 % of it, 0 = off. Was 200 (empirical). The servos' own overload trip (EEPROM overload_torque 25 for 2.0 s) is probably nearer 250: above that the guard no longer protects
     max_compensation_rad: 0.06
     max_speed_factor: 2.0           # ceiling of per-plan speed (x calibrated velocity / servo speed)      # robot-side cap of the static-error compensation
     publish_odom_tf: false          # the navigation merge decides who owns odom TF
+    low_voltage_warn_v: 10.0        # UI warning when a servo supply is below this (default 11.0; 0 = off). 10.8-10.9 V was normal on this battery
 /robot/camera_1/camera:
   ros__parameters:
     device: /dev/v4l/by-id/usb-GENERAL_GENERAL_WEBCAM_JH0319_20210712_v102-video-index0
