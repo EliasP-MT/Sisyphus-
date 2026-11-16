@@ -222,6 +222,98 @@ class Arm:
             rows.append({'t_s': float(t), 'q_rad': q, 'v_rad_s': v, 'a_rad_s2': a})
         return rows
 
+    def line_waypoints(self, q0, delta, step_m=0.002, position_tol_m=0.0003, rotation_tol_rad=0.26,
+                       max_joint_step_rad=0.05):
+        """Joint configurations along a STRAIGHT Cartesian line of the TCP (see _line_pass).
+
+        First the orientation is held STRICTLY (within 0.003 rad). If that is impossible, typically because a
+        joint sits at its limit, the line is solved again letting the orientation drift just enough, never
+        beyond rotation_tol_rad. The position is exact either way."""
+        try:
+            return self._line_pass(q0, delta, step_m, position_tol_m, 0.003, max_joint_step_rad, 100., .01)
+        except ValueError:
+            return self._line_pass(q0, delta, step_m, position_tol_m, rotation_tol_rad, max_joint_step_rad, .3, .3)
+
+    def _line_pass(self, q0, delta, step_m, position_tol_m, rotation_tol_rad, max_joint_step_rad,
+                   rotation_weight, regularization):
+        """One solve of the line. From the pose of q0 the TCP moves by `delta` (base_link, metres) in steps
+        of at most `step_m`. The POSITION of every point is exact (least-squares IK polished far below
+        position_tol_m, which is checked); the orientation error is bounded by rotation_tol_rad (checked).
+        rotation_weight / regularization set how much the orientation is held versus how little the joints
+        move. Each point is seeded by the previous one. Raises ValueError if a point cannot be reached, leaves
+        the joint limits, or the solution jumps between neighbouring points."""
+        from scipy.optimize import least_squares
+        q0 = self.check(q0)
+        delta = vector(delta, 3, 'déplacement de la ligne')
+        length = float(np.linalg.norm(delta))
+        if not 0 < length <= 0.5:
+            raise ValueError('Ligne droite : longueur entre 0 et 50 cm')
+        T0 = self.fk(q0)
+        p0, R0 = T0[:3, 3], T0[:3, :3]
+        n = max(1, math.ceil(length/step_m))
+        lo, hi = self.bounds[:, 0], self.bounds[:, 1]
+        points, q = [q0], q0
+        for k in range(1, n+1):
+            target, previous = p0 + delta*k/n, q
+
+            def residual(x, target=target, previous=previous):
+                T = self.chain.forward_kinematics(self.chain.active_to_full(x, np.zeros(len(self.chain.links))))
+                rotation = Rotation.from_matrix(R0.T @ T[:3, :3]).as_rotvec()
+                return np.concatenate([(T[:3, 3]-target)*10000., rotation*rotation_weight, regularization*(x-previous)])  # position first
+            seed = np.clip(previous, lo+1e-9, hi-1e-9)
+            result = least_squares(residual, seed, bounds=(lo, hi), xtol=1e-12, ftol=1e-12, gtol=1e-12, max_nfev=200)
+            q = self.check(result.x)
+            reached = self.fk(q)
+            error = float(np.linalg.norm(reached[:3, 3]-target))
+            error_r = float(Rotation.from_matrix(R0.T @ reached[:3, :3]).magnitude())
+            if error > position_tol_m or error_r > rotation_tol_rad:
+                raise ValueError(f'Ligne droite inaccessible au point {k}/{n} : erreur {error*1000:.2f} mm, rotation {np.degrees(error_r):.1f}°')
+            if np.max(np.abs(q-previous)) > max_joint_step_rad:
+                raise ValueError(f'Ligne droite : discontinuité IK au point {k}/{n}')
+            points.append(q)
+        return points
+
+    def timed_path(self, points):
+        """One smooth rest-to-rest profile along a dense joint polyline (no stop at the points).
+
+        The path parameter is the joint-space arc length. Its velocity / acceleration / jerk limits are the
+        tightest the per-joint limits allow over all segments (peak |dq_j/ds|), so every joint stays within
+        its calibrated (and per-joint scaled) limits. Returns rows like segment()."""
+        points = np.array([self.check(p) for p in points], float)
+        steps = np.diff(points, axis=0)
+        lengths = np.linalg.norm(steps, axis=1)
+        if len(points) < 2 or np.any(lengths <= 0):
+            raise ValueError('Chemin : au moins deux points distincts requis')
+        s = np.concatenate([[0.], np.cumsum(lengths)])
+        direction = steps/lengths[:, None]
+        peak = np.maximum(np.max(np.abs(direction), axis=0), 1e-9)
+        scales = joint_limit_scales(self.c)
+        limits = [float(np.min(self.c[key]*scale/peak)) for key, scale in (
+            ('max_velocity_rad_s', scales['velocity_scale']), ('max_acceleration_rad_s2', scales['acceleration_scale']),
+            ('max_jerk_rad_s3', scales['jerk_scale']))]
+        inp = InputParameter(1)
+        inp.current_position, inp.target_position = [0.], [float(s[-1])]
+        inp.current_velocity = inp.current_acceleration = [0.]
+        inp.target_velocity = inp.target_acceleration = [0.]
+        inp.max_velocity, inp.max_acceleration, inp.max_jerk = [limits[0]], [limits[1]], [limits[2]]
+        traj = Trajectory(1)
+        status = Ruckig(1).calculate(inp, traj)
+        if status < Result.Working:
+            raise ValueError(f'Ruckig refuse la trajectoire : {status}')
+        n = max(1, math.ceil(traj.duration/self.c['dt_s']))
+        if n > 100000:
+            raise ValueError('Trajectoire trop longue')
+        rows = []
+        for t in np.linspace(0, traj.duration, n+1):
+            position, velocity, acceleration = traj.at_time(float(t))
+            st = min(max(position[0], 0.), s[-1])
+            k = min(int(np.searchsorted(s, st, side='right'))-1, len(direction)-1)
+            q = np.array([np.interp(st, s, points[:, j]) for j in range(7)])
+            self.check(q)
+            rows.append({'t_s': float(t), 'q_rad': q, 'v_rad_s': direction[k]*velocity[0],
+                         'a_rad_s2': direction[k]*acceleration[0]})
+        return rows
+
     def plan(self, start, targets, mode='joint', rotation=None):
         if mode not in ('joint', 'linear') or not targets:
             raise ValueError('Mode joint/linear et au moins une cible requis')

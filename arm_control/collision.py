@@ -384,9 +384,10 @@ class CollisionWorld:
         from ompl import base as ob, geometric as og
         space = ob.RealVectorStateSpace(7)
         bounds = ob.RealVectorBounds(7)
+        margin = 0.01  # states on a joint limit are rounded to servo ticks later and could leave the limit
         for i, (low, high) in enumerate(self.arm.bounds):
-            bounds.setLow(i, float(low))
-            bounds.setHigh(i, float(high))
+            bounds.setLow(i, float(min(low + margin, start[i], goal[i])))   # never exclude the start / goal themselves
+            bounds.setHigh(i, float(max(high - margin, start[i], goal[i])))
         space.setBounds(bounds)
         # OMPL's native discrete validator also supports lastValid queries and
         # avoids ownership cycles from Python MotionValidator subclasses.

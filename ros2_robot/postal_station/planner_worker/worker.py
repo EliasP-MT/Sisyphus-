@@ -27,6 +27,7 @@ sys.path.insert(0, str(REPO / 'arm_control'))
 from planner import Arm, joints_to_ticks, load_config, require_calibration, ticks_to_joints  # noqa: E402
 
 URDF = REPO / 'arm_control/.sdk/hardware/elrobot/simulation/elrobot_follower.urdf'
+MONITOR_SLACK_M = 0.002  # the live collision monitor uses (plan margin - this)
 
 
 class Planner:
@@ -195,39 +196,120 @@ class Planner:
                         rows.append(row)
             finally:
                 c.update(saved)
-            plan = dict(samples=rows, collision_checked=True, collision_scene_sha256=world.fingerprint,
-                        targets_xyz_m=[arm.fk(end)[:3, 3].tolist()])
-            quantized = copy.deepcopy(plan)
-            for row in quantized['samples']:
-                row['q_rad'] = ticks_to_joints(c, joints_to_ticks(c, row['q_rad'])).tolist()
-            if gpu is not None:
-                try:
-                    gpu.validate_rows(plan['samples'])
-                    gpu.validate_rows(quantized['samples'])  # what the servos will actually be asked to do
-                except ValueError:
-                    # The GPU spheres are conservative (~7 % false alarms): the exact checker decides.
-                    world.validate_plan(plan)
-                    world.validate_plan(quantized)
-                    backend += '+exact-validation'
-                compensation, note = self._compensation_box_gpu(end)
-            else:
-                world.validate_plan(plan)
-                world.validate_plan(quantized)  # what the servos will actually be asked to do
-                compensation, note = self._compensation_box(end)
-            reasons = []
+            return self._finish(rows, end, len(path), begin, backend, f, fa, fj)
+
+    def _finish(self, rows, end, waypoints, begin, backend, f, fa, fj):
+        """Common end of a plan: validate the timed rows AND their tick-quantized version (what the servos
+        will really be asked to do), compute the compensation bounds, pack the reply. Called with the lock."""
+        c, arm, world, gpu = self.config, self.arm, self.world, self.gpu
+        plan = dict(samples=rows, collision_checked=True, collision_scene_sha256=world.fingerprint,
+                    targets_xyz_m=[arm.fk(end)[:3, 3].tolist()])
+        quantized = copy.deepcopy(plan)
+        for row in quantized['samples']:
+            row['q_rad'] = ticks_to_joints(c, joints_to_ticks(c, row['q_rad'])).tolist()
+        if gpu is not None:
             try:
-                world.require_hardware_ready()
-            except ValueError as exc:
-                reasons.append(str(exc))
-            return dict(times=[float(r['t_s']) for r in quantized['samples']],
-                        positions=[[float(v) for v in r['q_rad']] for r in quantized['samples']],
-                        duration_s=float(rows[-1]['t_s']), collision_scene_sha256=world.fingerprint,
-                        calibration_sha256=self.calibration_sha, waypoints=len(path),
-                        reasons=reasons, executable=not reasons,
-                        compensation_limit_rad=compensation, compensation_note=note,
-                        planning_s=time.monotonic() - begin, collision_checks=world.checks,
-                        speed_factor=f, accel_factor=fa, jerk_factor=fj, backend=backend,
-                        exact_checks=gpu.exact_checks if gpu is not None else world.checks)
+                gpu.validate_rows(plan['samples'])
+                gpu.validate_rows(quantized['samples'])  # what the servos will actually be asked to do
+            except ValueError:
+                # The GPU spheres are conservative (~7 % false alarms): the exact checker decides.
+                world.validate_plan(plan)
+                world.validate_plan(quantized)
+                backend += '+exact-validation'
+            compensation, note = self._compensation_box_gpu(end)
+        else:
+            world.validate_plan(plan)
+            world.validate_plan(quantized)  # what the servos will actually be asked to do
+            compensation, note = self._compensation_box(end)
+        reasons = []
+        try:
+            world.require_hardware_ready()
+        except ValueError as exc:
+            reasons.append(str(exc))
+        return dict(times=[float(r['t_s']) for r in quantized['samples']],
+                    positions=[[float(v) for v in r['q_rad']] for r in quantized['samples']],
+                    end_ticks=[int(t) for t in joints_to_ticks(c, quantized['samples'][-1]['q_rad'])],
+                    duration_s=float(rows[-1]['t_s']), collision_scene_sha256=world.fingerprint,
+                    calibration_sha256=self.calibration_sha, waypoints=waypoints,
+                    reasons=reasons, executable=not reasons,
+                    compensation_limit_rad=compensation, compensation_note=note,
+                    planning_s=time.monotonic() - begin, collision_checks=world.checks,
+                    speed_factor=f, accel_factor=fa, jerk_factor=fj, backend=backend,
+                    exact_checks=gpu.exact_checks if gpu is not None else world.checks)
+
+    def tcp_error(self, start_ticks, ideal_delta_m, measured_ticks):
+        """Where the fingertips are (measured ticks) minus where a straight line of ideal_delta_m (base_link, m)
+        from start_ticks should end, in mm (x, y, z). Positive z = higher than the ideal end."""
+        import numpy as np
+        self._check_ticks(start_ticks, 'Line start')
+        self._check_ticks(measured_ticks, 'Measured arm')
+        delta = np.array([float(v) for v in ideal_delta_m])
+        if delta.shape != (3,):
+            raise ValueError('ideal_delta_m: three values')
+        with self.lock:
+            ideal = self.arm.fk(ticks_to_joints(self.config, start_ticks))[:3, 3] + delta
+            got = self.arm.fk(ticks_to_joints(self.config, measured_ticks))[:3, 3]
+        return dict(error_mm=[round(float(v), 2) for v in (got - ideal) * 1000.])
+
+    def plan_line(self, start_ticks, delta_m, speed_factor=1., accel_factor=1., jerk_factor=1.,
+                  max_error_mm=1.5, max_rotation_deg=15.):
+        """A STRAIGHT Cartesian line of the TCP from the arm configuration `start_ticks`: it moves by
+        `delta_m` (base_link, metres), as ONE smooth profile (no stop on the way). The position is exact; the
+        gripper orientation is held as well as the joint limits allow. The planned joint trajectory is checked
+        after the tick quantization the servos will execute: the plan is refused if that path leaves the ideal
+        line by more than max_error_mm or turns the gripper by more than max_rotation_deg."""
+        import numpy as np
+        from scipy.spatial.transform import Rotation
+        f, fa, fj = float(speed_factor), float(accel_factor or 1.), float(jerk_factor or 1.)
+        if not (0.1 <= f <= self.max_speed_factor):
+            raise ValueError(f'speed_factor must be within 0.1..{self.max_speed_factor}')
+        if not (0.1 <= fa <= 4.) or not (0.1 <= fj <= 4.):
+            raise ValueError('accel_factor and jerk_factor must be within 0.1..4')
+        delta = [float(v) for v in delta_m]
+        if len(delta) != 3 or not all(abs(v) <= .5 for v in delta):
+            raise ValueError('delta_m: three values within +/-0.5 m')
+        from planner import joint_limit_scales
+        vscale = float(joint_limit_scales(self.config)['velocity_scale'].max())
+        if self.config['max_velocity_rad_s'] * f * vscale > self.urdf_velocity:
+            raise ValueError('Requested speed exceeds the URDF joint velocity limit')
+        self._check_ticks(start_ticks, 'Current arm')
+        with self.lock:
+            begin = time.monotonic()
+            c, arm, world, gpu = self.config, self.arm, self.world, self.gpu
+            if gpu is not None:
+                gpu.exact_checks = 0
+            start = ticks_to_joints(c, start_ticks)
+            points = arm.line_waypoints(start, delta, step_m=0.003, rotation_tol_rad=float(np.radians(max_rotation_deg)))
+            end = points[-1]
+            keys = ('max_velocity_rad_s', 'max_acceleration_rad_s2', 'max_jerk_rad_s3')
+            saved = {k: c[k] for k in keys}
+            try:
+                for k, factor in zip(keys, (f, fa, fj)):
+                    c[k] = saved[k] * factor
+                rows = arm.timed_path(points)
+            finally:
+                c.update(saved)
+            # accuracy of what the servos will execute (ticks), against the ideal line and the start orientation
+            T0 = arm.fk(start)
+            p0, R0 = T0[:3, 3], T0[:3, :3]
+            length = float(np.linalg.norm(delta))
+            direction = np.array(delta) / length
+            worst_mm = worst_deg = 0.
+            for row in rows:
+                T = arm.fk(ticks_to_joints(c, joints_to_ticks(c, row['q_rad'])))
+                offset = T[:3, 3] - p0
+                along = float(offset @ direction)
+                if not -0.0005 <= along <= length + 0.0005:
+                    worst_mm = max(worst_mm, 1000 * max(-along, along - length))
+                worst_mm = max(worst_mm, 1000 * float(np.linalg.norm(offset - along * direction)))
+                worst_deg = max(worst_deg, float(np.degrees(Rotation.from_matrix(R0.T @ T[:3, :3]).magnitude())))
+            if worst_mm > max_error_mm or worst_deg > max_rotation_deg:
+                raise ValueError(f'The line is not precise enough after the servo tick quantization: '
+                                 f'{worst_mm:.2f} mm off the line (limit {max_error_mm}), gripper turned {worst_deg:.2f}° '
+                                 f'(limit {max_rotation_deg})')
+            result = self._finish(rows, end, len(points), begin, 'curobo-line' if gpu is not None else 'cpu-line', f, fa, fj)
+            result.update(line_length_m=length, line_error_mm=round(worst_mm, 3), line_rotation_deg=round(worst_deg, 3))
+            return result
 
     def _compensation_box_gpu(self, final):
         def in_range(q):
@@ -296,7 +378,17 @@ class Planner:
                 q = self.arm.check(ticks_to_joints(self.config, ticks))
             except ValueError as exc:
                 return dict(valid=False, reason=f'outside calibrated range: {exc}')
-            reason = self.world.collision(q)
+            # The execution monitor tolerates MONITOR_SLACK_M less margin than the plans were made with: servo
+            # tracking and gravity sag move the real arm a millimetre or two (4.9 mm from a box with a 5 mm margin
+            # cancelled a safe move). The plans themselves keep the full margin.
+            world, saved = self.world, self.world.scene['margin_m']
+            world.scene['margin_m'] = max(0.002, saved - MONITOR_SLACK_M)
+            world.__dict__.pop('_last_q', None)  # the one-pose cache was computed with another margin
+            try:
+                reason = world.collision(q)
+            finally:
+                world.scene['margin_m'] = saved
+                world.__dict__.pop('_last_q', None)
             return dict(valid=reason is None, reason=reason or '')
 
 
@@ -326,6 +418,12 @@ def serve(planner, port):
                                                         body.get('speed_factor', 1.),
                                                         body.get('accel_factor', 1.),
                                                         body.get('jerk_factor', 1.)))
+                if self.path == '/tcp_error':
+                    return self.reply(200, planner.tcp_error(body['start_ticks'], body['ideal_delta_m'], body['measured_ticks']))
+                if self.path == '/plan_line':
+                    return self.reply(200, planner.plan_line(body['start_ticks'], body['delta_m'],
+                                                             body.get('speed_factor', 1.), body.get('accel_factor', 1.),
+                                                             body.get('jerk_factor', 1.)))
                 if self.path == '/plan_via':
                     return self.reply(200, planner.plan_via(body['start_ticks'], body['via_ticks'], body['goal_ticks'],
                                                             body.get('speed_factor', 1.), body.get('accel_factor', 1.),

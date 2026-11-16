@@ -47,7 +47,10 @@ class GpuPlanning:
         self.world.require_pose(goal, 'Arrivée')
         if self.path_ok([start, goal]):
             return [start, goal]
-        lo, hi = self.gpu.bounds[:, 0], self.gpu.bounds[:, 1]
+        # Keep the via points inside the joint limits by a margin: a via on a limit is rounded to the servo ticks
+        # (up to 0.8 mrad) when the plan is quantized, which can push it past the URDF limit and refuse the plan.
+        margin = 0.03
+        lo, hi = self.gpu.bounds[:, 0] + margin, self.gpu.bounds[:, 1] - margin
         mid = (start + goal) / 2
         vias = np.concatenate([
             self.rng.uniform(lo, hi, (self.via_samples // 2, 7)),

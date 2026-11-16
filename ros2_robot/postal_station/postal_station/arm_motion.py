@@ -164,7 +164,16 @@ class ArmMotion(Node):
         response.success = False
         try:
             self.set_status('planning', f'Planning to "{request.pose_name}"')
-            if len(request.goal_ticks) == 7:  # a computed target (e.g. the slot of a mailbox), not a stored pose
+            is_line = len(request.line_delta_m) == 3  # a straight Cartesian line from the start configuration
+            if is_line:
+                from types import SimpleNamespace
+                pose = SimpleNamespace(name=request.pose_name or 'line', warnings=[], ticks=[0] * 8)  # end set below
+                poses = SimpleNamespace(poses=[])
+                if request.start_pose_name:
+                    poses = self.call(self.list_poses, ListPoses.Request())
+                    if not poses.success:
+                        raise RuntimeError(poses.message)
+            elif len(request.goal_ticks) == 7:  # a computed target (e.g. the slot of a mailbox), not a stored pose
                 from types import SimpleNamespace
                 pose = SimpleNamespace(name=request.pose_name or 'target', warnings=[],
                                        ticks=list(request.goal_ticks) + [self.measured_ticks()[7]])
@@ -190,7 +199,9 @@ class ArmMotion(Node):
             began = time.monotonic()
             fixed = request.start_pose_name != ''
             key = None
-            if fixed:  # pose-to-pose legs never change: computed once, kept on disk for later runs
+            if fixed and is_line:  # a line from a stored pose never changes either
+                key = f'{self.planner_ids()}|line|{list(start[:7])}|{[round(v, 6) for v in request.line_delta_m]}|{speed}|{accel}|{jerk}'
+            elif fixed:  # pose-to-pose legs never change: computed once, kept on disk for later runs
                 ids = self.planner_ids()
                 key = f'{ids}|{list(start[:7])}|{list(pose.ticks[:7])}|{speed}|{accel}|{jerk}'
             if key is not None and key in self.leg_cache:
@@ -200,7 +211,10 @@ class ArmMotion(Node):
                 via = [list(request.via_ticks[k:k + 7]) for k in range(0, len(request.via_ticks) - 6, 7)]
                 body = {'start_ticks': start[:7], 'goal_ticks': list(pose.ticks)[:7],
                         'speed_factor': speed, 'accel_factor': accel, 'jerk_factor': jerk}
-                if via:
+                if is_line:
+                    result = self.request('/plan_line', {'start_ticks': start[:7], 'delta_m': [float(v) for v in request.line_delta_m],
+                                                         'speed_factor': speed, 'accel_factor': accel, 'jerk_factor': jerk}, timeout=120.)
+                elif via:
                     result = self.request('/plan_via', {**body, 'via_ticks': via}, timeout=75. * (len(via) + 1))
                 else:
                     result = self.request('/plan', body, timeout=75.)
@@ -208,6 +222,8 @@ class ArmMotion(Node):
                     self.leg_cache[key] = result
                     self.save_cache()
             self.get_logger().info(f'Plan to {request.pose_name} at {speed:g}x in {time.monotonic() - began:.1f} s')
+            if is_line:  # the goal of a line is where it ends (gripper opening unchanged)
+                pose.ticks = list(result['end_ticks']) + [start[7]]
             reasons = list(result['reasons'])
             if pose.warnings:
                 reasons += [f'pose warning: {w}' for w in pose.warnings]
@@ -236,8 +252,11 @@ class ArmMotion(Node):
             self.preview_plan, self.preview_start = record, time.monotonic()
             response.success, response.executable, response.plan_id = True, not reasons, plan_id
             response.reasons, response.duration_s = reasons, result['duration_s']
+            response.end_ticks = [int(t) for t in list(pose.ticks)[:7]]
             response.collision_scene_sha256, response.trajectory = result['collision_scene_sha256'], traj
-            response.message = (f'Collision-free plan at {speed:g}x speed (accel {accel:g}x, jerk {jerk:g}x), '
+            line_note = (f'straight line {result["line_length_m"] * 100:.1f} cm, {result["line_error_mm"]:.2f} mm off the line, '
+                         f'gripper turned {result["line_rotation_deg"]:.1f} deg; ' if is_line else '')
+            response.message = (f'Collision-free {line_note}plan at {speed:g}x speed (accel {accel:g}x, jerk {jerk:g}x), '
                                 f'{result["duration_s"]:.1f} s, '
                                 f'{len(result["times"])} checked samples, planned in {result["planning_s"]:.1f} s; '
                                 f'{result["compensation_note"]}')

@@ -99,6 +99,7 @@ class Core(Node):
         p('overload_load_raw', 200)  # raw servo load (0-1000) at which the servo's own protection trips; 0 = guard off
         p('stationary_speed_ticks_s', 10)
         p('publish_odom_tf', False)
+        p('low_voltage_warn_v', 11.)  # a servo supply below this raises a (non-blocking) UI warning; 0 = off
         g = lambda name: self.get_parameter(name).value
 
         self.calibration = Calibration.load(g('calibration'))
@@ -129,7 +130,8 @@ class Core(Node):
                                       'dispenser_default_speed', 'dispenser_max_duration_s',
                                       'gripper_min_ticks', 'gripper_max_ticks', 'gripper_speed_ticks_s',
                                       'start_tolerance_rad', 'arrival_tolerance_rad', 'arrival_timeout_s',
-                                      'stationary_speed_ticks_s', 'publish_odom_tf', 'max_compensation_rad', 'max_speed_factor', 'overload_load_raw')}
+                                      'stationary_speed_ticks_s', 'publish_odom_tf', 'max_compensation_rad', 'max_speed_factor', 'overload_load_raw',
+                                      'low_voltage_warn_v')}
         if not 0 < abs(self.cfg['dispenser_default_speed']) <= 1000:
             raise ValueError('Dispenser default speed must be within -1000..1000 and non-zero')
         if not 0 < self.cfg['dispenser_max_duration_s'] <= 60:
@@ -149,6 +151,7 @@ class Core(Node):
         self.dispenser_deadline = None
         self.run = self.run_plan = None
         self.odom = [0., 0., 0.]
+        self.eeprom_logged = set()  # servos whose protection settings were already logged
         self.warnings, self.last_diag = [], 0.
 
         cb = ReentrantCallbackGroup()
@@ -229,6 +232,21 @@ class Core(Node):
             self.bus_retry = time.monotonic() + 2
             self.get_logger().error(f'Serial bus unavailable: {exc}', throttle_duration_sec=10)
 
+    def _log_eeprom(self, motor_id):
+        """Diagnostic, read-only: log the servo's EEPROM (0x00..0x27) once, to see its own protection
+        settings. Field names follow the Feetech STS memory table and are not verified on this firmware;
+        the raw bytes are logged too. Never raises."""
+        try:
+            raw = self.bus.read(motor_id, 0x00, 0x28)[0]
+            u16 = lambda a: raw[a] | raw[a + 1] << 8  # noqa: E731
+            fields = (f'max_torque={u16(0x10)} unloading_cond=0x{raw[0x13]:02x} led_alarm_cond=0x{raw[0x14]:02x} '
+                      f'protection_current={u16(0x1c)} max_temp={raw[0x0d]} min_v={raw[0x0f]} max_v={raw[0x0e]} '
+                      f'protective_torque={raw[0x22]} protection_time={raw[0x23]} overload_torque={raw[0x24]} '
+                      f'overcurrent_time={raw[0x26]}')
+            self.get_logger().info(f'EEPROM ID {motor_id}: {fields} raw={bytes(raw).hex()}')
+        except Exception as exc:  # noqa: BLE001 - a diagnostic must never break polling
+            self.get_logger().warning(f'EEPROM ID {motor_id}: unreadable ({exc})')
+
     def _bus_lost(self, exc):
         self.get_logger().error(f'Serial bus lost: {exc}')
         try:
@@ -250,6 +268,9 @@ class Core(Node):
                     mode = self.bus.read(m.motor_id, st3215.MODE, 1)[0][0]
                     self.bus.reply_to_writes[m.motor_id] = level != 0
                     m.mode = mode
+                    if m.motor_id not in self.eeprom_logged:
+                        self.eeprom_logged.add(m.motor_id)
+                        self._log_eeprom(m.motor_id)
                 payload, status, received = self.bus.read(m.motor_id, st3215.BLOCK_START, st3215.BLOCK_SIZE)
                 m.data, m.packet_error, m.received = st3215.decode_block(payload), status, received
                 m.sequence += 1
@@ -337,7 +358,7 @@ class Core(Node):
             if m.data and self._fresh(m):
                 if m.data['temperature'] >= 60:
                     warnings.append(f'ID {m.motor_id} temperature {m.data["temperature"]} °C')
-                if m.data['voltage'] < 11.:
+                if m.data['voltage'] < self.cfg['low_voltage_warn_v']:
                     warnings.append(f'ID {m.motor_id} supply {m.data["voltage"]:.1f} V')
         for group in ('arm', 'base', 'dispenser'):
             if not self._torque(group):

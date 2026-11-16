@@ -24,6 +24,7 @@ from pathlib import Path
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
 from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
@@ -76,6 +77,7 @@ class Station(Node):
         self.received = {}
         self.arm_status = {'stage': 'idle', 'message': ''}
         self.base_cmd, self.base_time, self.base_sent_zero = None, 0., True
+        self.odom_xy, self.odom_time = None, 0.  # wheel odometry of the robot (task drive steps)
         self.cameras = {1: Camera(), 2: Camera()}
         self.go_handle, self.go_feedback, self.go_result = None, None, None
         self.planner_status, self.planner_time = {'hardware_ready': False, 'reason': 'not queried yet'}, 0.
@@ -84,6 +86,7 @@ class Station(Node):
         self.create_subscription(MotorStateArray, '/robot/motors', self.keep('motors'), 10)
         self.create_subscription(JointState, '/robot/joint_states', self.keep('joints'), qos_profile_sensor_data)
         self.create_subscription(String, '/station/arm/status', self.on_arm_status, 10)
+        self.create_subscription(Odometry, '/robot/base/odom', self.on_odom, qos_profile_sensor_data)
         self.slam, self.slam_time, self.slam_frame = None, 0., None
         self.create_subscription(String, '/slam/status', self.on_slam_status, 10)
         self.create_subscription(CompressedImage, '/slam/image/compressed', self.on_slam_image,
@@ -218,6 +221,12 @@ class Station(Node):
         if any(i not in motors or not motors[i].fresh for i in range(1, 8)):
             raise RuntimeError('No fresh arm feedback')
         return [motors[i].position_ticks for i in range(1, 8)]
+
+    def arm_speeds(self):
+        """Measured speed (ticks/s) of arm motors 1..7, for diagnostics."""
+        with self.lock:
+            motors = {m.motor_id: m for m in self.motors.motors} if self.motors else {}
+        return [int(motors[i].speed_ticks_s) if i in motors else None for i in range(1, 8)]
 
     def wait_arm_still(self, timeout=4., speed_ticks_s=8, hold_s=.3):
         """Wait until every arm motor has been still for hold_s (the robot refuses to start a trajectory
@@ -369,6 +378,52 @@ class Station(Node):
 
     def browser_alive(self):
         return time.monotonic() - self.last_ping <= self.browser_timeout
+
+    def on_odom(self, msg):
+        self.odom_xy, self.odom_time = (msg.pose.pose.position.x, msg.pose.pose.position.y), time.monotonic()
+
+    def drive_check(self):
+        """Raise RuntimeError unless the base can be driven right now (no motion is started)."""
+        sup = self.supervisor
+        if sup is None or sup.state != 1:
+            raise RuntimeError('Base drive: the robot is not ACTIVE (acknowledge first)')
+        if not sup.base_enabled:
+            raise RuntimeError('Base drive: base torque is off (enable the base)')
+        if not self.browser_alive():
+            raise RuntimeError('Base drive: the station page is not open (no heartbeat, the robot would stop the base)')
+        if self.odom_xy is None or time.monotonic() - self.odom_time > 1.:
+            raise RuntimeError('Base drive: no wheel odometry from the robot')
+
+    def drive(self, distance_m, speed_m_s=.08, should_stop=lambda: False):
+        """Drive straight by `distance_m` (+ forward, - backward), closed loop on the wheel odometry.
+
+        Speed is capped at 0.1 m/s and slows down over the last 4 cm. A drive that does not make progress
+        (base off, wheels blocked) or takes more than twice the expected time stops and raises. Returns the
+        distance travelled according to the odometry (wheel-speed integration: it does not see slip)."""
+        distance = abs(float(distance_m))
+        if not 0 < distance <= .5:
+            raise ValueError('Base drive: distance must be within 0..50 cm')
+        speed = min(abs(float(speed_m_s)), .1)
+        sign = 1. if distance_m > 0 else -1.
+        self.drive_check()
+        start, began, travelled = self.odom_xy, time.monotonic(), 0.
+        limit = 2 * distance / speed + 2.
+        try:
+            while travelled < distance:
+                if should_stop():
+                    break
+                now = time.monotonic()
+                if now - began > limit:
+                    raise RuntimeError(f'Base drive: only {travelled * 100:.1f} cm of {distance * 100:.0f} cm in {limit:.0f} s')
+                if not self.browser_alive() or now - self.odom_time > 1.:
+                    raise RuntimeError('Base drive: heartbeat or odometry lost; base stopped')
+                travelled = math.hypot(self.odom_xy[0] - start[0], self.odom_xy[1] - start[1])
+                v = min(speed, max(.03, (distance - travelled) * 2.5))
+                self.base_cmd, self.base_time = [sign * v, 0., 0.], now
+                time.sleep(.05)
+        finally:
+            self.base_cmd = None  # tick() sends one zero Twist; the robot also times out after 0.3 s
+        return travelled
 
     def tick(self):
         if self.browser_alive():
