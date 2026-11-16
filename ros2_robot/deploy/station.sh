@@ -21,7 +21,11 @@ PROFILE=$HERE/.station_ws/dds.xml
 sed -e "s/@PC_IP@/$PC_IP/g" -e "s/@ROBOT_IP@/$ROBOT_WIFI_IP/g" "$HERE/deploy/fastdds_station.xml.in" > "$PROFILE"
 echo "Station DDS on $DEV ($PC_IP) -> robot $ROBOT_WIFI_IP, domain ${ROS_DOMAIN_ID:-43}"
 
-"$REPO/arm_control/.venv/bin/python" "$HERE/postal_station/planner_worker/worker.py" \
+# cuRobo GPU backend when its venv exists (arm_control/curobo/README.md); the worker falls back to the
+# exact CPU pipeline by itself if CUDA is unavailable. POSTAL_PLANNER_BACKEND=cpu forces the CPU pipeline.
+PLANNER_PY=${PLANNER_PY:-$HOME/hack/curobo-src/.venv/bin/python}
+[[ -x $PLANNER_PY ]] || PLANNER_PY=$REPO/arm_control/.venv/bin/python
+"$PLANNER_PY" "$HERE/postal_station/planner_worker/worker.py" \
   --calibration "$CALIBRATION" --scene "$SCENE" ${CAMERA_MOUNT:+--camera-mount "$CAMERA_MOUNT"} \
   > "$HERE/.station_ws/planner.log" 2>&1 &
 WORKER=$!

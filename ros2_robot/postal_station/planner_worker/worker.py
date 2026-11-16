@@ -14,6 +14,7 @@ import argparse
 import copy
 import hashlib
 import json
+import os
 import sys
 import threading
 import time
@@ -38,6 +39,16 @@ class Planner:
         self.arm = Arm(URDF, self.config)
         self.world = CollisionWorld(URDF, self.arm, self.scene_path)
         self.arm.collision = self.world
+        self.gpu, self.gpu_error = None, ''
+        if os.environ.get('POSTAL_PLANNER_BACKEND', 'curobo') == 'curobo':
+            try:  # cuRobo accelerator; any failure keeps the exact CPU pipeline (OMPL + PyBullet)
+                from curobo_backend import CuroboWorld
+                from gpu_planning import GpuPlanning
+                self.gpu = GpuPlanning(CuroboWorld(self.scene_path, self.arm.bounds), self.world)
+                self.gpu.gpu.valid_batch(self.arm.bounds.mean(1)[None])  # warm-up (CUDA kernels)
+            except Exception as exc:  # noqa: BLE001 - reported in /status
+                self.gpu, self.gpu_error = None, f'{type(exc).__name__}: {exc}'
+                print(f'cuRobo backend unavailable, CPU pipeline only: {self.gpu_error}', flush=True)
         self.lock = threading.Lock()
         self.ready_cache, self.ready_time = None, 0.
         import xml.etree.ElementTree as ET
@@ -130,7 +141,8 @@ class Planner:
                     self_margin_m=s['self_margin_m'], edge_step_rad=s['edge_step_rad'],
                     gripper_angle_rad=s['gripper_angle_rad'], planning_time_s=s['planning_time_s'],
                     registration=s.get('registration', {}).get('method', ''),
-                    max_velocity_rad_s=self.config['max_velocity_rad_s'])
+                    max_velocity_rad_s=self.config['max_velocity_rad_s'],
+                    backend='curobo' if self.gpu else 'cpu', backend_error=self.gpu_error)
 
     def _check_ticks(self, ticks, label):
         if len(ticks) != 7 or any(type(t) is not int for t in ticks):
@@ -159,7 +171,16 @@ class Planner:
             begin = time.monotonic()
             c, arm, world = self.config, self.arm, self.world
             start, end = ticks_to_joints(c, start_ticks), ticks_to_joints(c, goal_ticks)
-            path = world.joint_path(start, end)  # geometry does not depend on speed
+            gpu, backend = self.gpu, 'cpu'
+            path = None
+            if gpu is not None:
+                gpu.exact_checks = 0
+                path = gpu.joint_path(start, end)
+                backend = 'curobo'
+            if path is None:  # no GPU, or no direct / one-via path: exact OMPL search
+                path = world.joint_path(start, end)  # geometry does not depend on speed
+                if gpu is not None:
+                    backend = 'curobo+ompl'
             keys = ('max_velocity_rad_s', 'max_acceleration_rad_s2', 'max_jerk_rad_s3')
             saved = {k: c[k] for k in keys}
             rows = []
@@ -176,12 +197,23 @@ class Planner:
                 c.update(saved)
             plan = dict(samples=rows, collision_checked=True, collision_scene_sha256=world.fingerprint,
                         targets_xyz_m=[arm.fk(end)[:3, 3].tolist()])
-            world.validate_plan(plan)
             quantized = copy.deepcopy(plan)
             for row in quantized['samples']:
                 row['q_rad'] = ticks_to_joints(c, joints_to_ticks(c, row['q_rad'])).tolist()
-            world.validate_plan(quantized)  # what the servos will actually be asked to do
-            compensation, note = self._compensation_box(end)
+            if gpu is not None:
+                try:
+                    gpu.validate_rows(plan['samples'])
+                    gpu.validate_rows(quantized['samples'])  # what the servos will actually be asked to do
+                except ValueError:
+                    # The GPU spheres are conservative (~7 % false alarms): the exact checker decides.
+                    world.validate_plan(plan)
+                    world.validate_plan(quantized)
+                    backend += '+exact-validation'
+                compensation, note = self._compensation_box_gpu(end)
+            else:
+                world.validate_plan(plan)
+                world.validate_plan(quantized)  # what the servos will actually be asked to do
+                compensation, note = self._compensation_box(end)
             reasons = []
             try:
                 world.require_hardware_ready()
@@ -194,7 +226,21 @@ class Planner:
                         reasons=reasons, executable=not reasons,
                         compensation_limit_rad=compensation, compensation_note=note,
                         planning_s=time.monotonic() - begin, collision_checks=world.checks,
-                        speed_factor=f, accel_factor=fa, jerk_factor=fj)
+                        speed_factor=f, accel_factor=fa, jerk_factor=fj, backend=backend,
+                        exact_checks=gpu.exact_checks if gpu is not None else world.checks)
+
+    def _compensation_box_gpu(self, final):
+        def in_range(q):
+            try:
+                joints_to_ticks(self.config, self.arm.check(q))
+                return True
+            except ValueError:
+                return False
+        bounds = self.gpu.compensation_box(final, in_range)
+        if not any(bounds):
+            return [0.] * 7, 'compensation unavailable (no validated collision-free bound around the target)'
+        text = ', '.join(f'J{j + 1} {b:g}' for j, b in enumerate(bounds) if b)
+        return bounds, f'static-error compensation (rad) {text} validated'
 
     def _compensation_box(self, final, limit=.06):
         """Validate the per-joint static-error compensation bounds around the final pose.
