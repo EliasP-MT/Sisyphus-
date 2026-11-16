@@ -335,7 +335,7 @@ class TaskTests(unittest.TestCase):
         self.assertEqual(snap['mailboxes'][0]['slot_base_m'], [0.02, 0.33, 0.23])
         names = [n for n, _ in s.log]
         self.assertEqual(names[0], 'detect')  # the survey is the first thing that happens
-        self.assertEqual(names.count('detect'), 1 + 3)  # survey + one live detection per letter
+        self.assertEqual(names.count('detect'), 2 + 3)  # survey (two photographs merged) + one live detection per letter
         self.assertEqual(names.count('dispense'), 3)    # three letters picked
         self.assertEqual([f for n, f in s.log if n == 'drive'], [.2, -.2] * 3)
         planned = [f['pose_name'] for n, f in s.log if n == 'plan']
@@ -359,7 +359,7 @@ class TaskTests(unittest.TestCase):
         snap = self._start(r, s)
         self.assertEqual(snap['phase'], 'failed')
         self.assertIn('not found on camera 2', snap['message'])  # the live detection decided
-        self.assertIn('not in the survey', snap['steps'][8]['detail'])  # READ warned but let it continue
+        self.assertIn('not in the survey', snap['steps'][7]['detail'])  # READ warned but let it continue
         self.assertEqual(snap['fsm'], {'state': 'FAILED', 'letter': 1})
         self.assertEqual(snap['letters'][0]['status'], 'failed')
         self.assertNotIn(('gripper', {'ticks': 2000}), s.log)   # the letter stays in the gripper
