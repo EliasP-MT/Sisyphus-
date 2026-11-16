@@ -29,7 +29,7 @@ from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage, JointState
 from std_msgs.msg import String
 
@@ -87,20 +87,7 @@ class Station(Node):
         self.create_subscription(JointState, '/robot/joint_states', self.keep('joints'), qos_profile_sensor_data)
         self.create_subscription(String, '/station/arm/status', self.on_arm_status, 10)
         self.create_subscription(Odometry, '/robot/base/odom', self.on_odom, qos_profile_sensor_data)
-        self.slam, self.slam_time, self.slam_frame = None, 0., None
-        self.create_subscription(String, '/slam/status', self.on_slam_status, 10)
-        self.create_subscription(CompressedImage, '/slam/image/compressed', self.on_slam_image,
-                                 qos_profile_sensor_data)
-        self.slam_cmd = self.create_publisher(String, '/slam/command', 10)
-        self.slam_photos = {}
         self.detect_result, self.detect_frame = None, None
-        # OCR bridge: the robot's SLAM has no OCR model; it publishes the rectified label and
-        # the PC reads it with the station OCR worker (base_ocr), then answers on /slam/ocr_result.
-        self.ocr_result_pub = self.create_publisher(String, '/slam/ocr_result', 10)
-        self.create_subscription(String, '/slam/ocr_request', self.on_ocr_request, 10)
-        self.create_subscription(String, '/slam/photos', self.on_slam_photos,
-                                 QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
-                                            durability=DurabilityPolicy.TRANSIENT_LOCAL))
         for i, cam in self.cameras.items():
             self.create_subscription(CompressedImage, f'/robot/camera_{i}/image/compressed', cam.update,
                                      qos_profile_sensor_data)
@@ -124,12 +111,6 @@ class Station(Node):
                 setattr(self, name, msg)
                 self.received[name] = time.time()
         return store
-
-    def on_slam_status(self, msg):
-        try:
-            self.slam, self.slam_time = json.loads(msg.data), time.time()
-        except ValueError:
-            pass
 
     def detect_mailboxes(self, camera, frames=DETECT_FRAMES):
         """Run the mailbox detector (+ OCR) on several successive frames of the camera and keep every
@@ -322,54 +303,6 @@ class Station(Node):
                 'target_xyz_m': [round(v, 4) for v in target], 'slot_base_m': label['slot_base_m'],
                 'ik': {k: ik[k] for k in ('position_error_m', 'axis_error_deg', 'tip_xyz_m')}}
 
-    def on_ocr_request(self, msg):
-        threading.Thread(target=self.serve_ocr, args=(msg.data,), daemon=True).start()
-
-    def serve_ocr(self, data):
-        reply = {'id': None, 'success': False, 'message': 'malformed request'}
-        try:
-            request = json.loads(data)
-            reply['id'] = request['id']
-            http = urllib.request.Request('http://127.0.0.1:8894/regions',
-                                          json.dumps({'image_b64': request['image_b64']}).encode(),
-                                          {'Content-Type': 'application/json'})
-            reply = {'id': request['id'], **json.load(urllib.request.urlopen(http, timeout=60))}
-        except Exception as exc:
-            reply['message'] = f'station OCR failed: {exc}'
-        self.ocr_result_pub.publish(String(data=json.dumps(reply)))
-
-    def on_slam_photos(self, msg):
-        import base64
-        try:
-            self.slam_photos = {k: base64.b64decode(v) for k, v in json.loads(msg.data).items()}
-        except (ValueError, TypeError):
-            pass
-
-    def on_slam_image(self, msg):
-        self.slam_frame = bytes(msg.data)
-
-    def slam_start(self, execute):
-        status = self.slam if time.time() - self.slam_time < 3 else None
-        if status is None:
-            return {'success': False, 'message': 'SLAM node on the robot is not answering (postal-slam.service?)'}
-        if status.get('active'):
-            return {'success': False, 'message': 'A SLAM run is already active'}
-        sup = self.supervisor
-        if sup is None or sup.state != 1:
-            return {'success': False, 'message': 'Supervisor is not ACTIVE: acknowledge in this panel first'}
-        poses = self.call('list')
-        scan = next((p for p in poses.poses if p.name == 'scan'), None) if poses.success else None
-        if scan is None:
-            return {'success': False, 'message': 'Pose "scan" not found on the robot'}
-        with self.lock:
-            motors = {m.motor_id: m for m in self.motors.motors} if self.motors else {}
-        off = [abs(motors[i + 1].position_ticks - scan.ticks[i]) if i + 1 in motors else 9999 for i in range(7)]
-        if max(off) > 40:
-            return {'success': False, 'message': 'Arm is not at the "scan" pose (largest joint error '
-                    f'{max(off)} ticks > 40): go to scan first; the arm must not move during SLAM'}
-        self.slam_cmd.publish(String(data=json.dumps({'cmd': 'start', 'execute': bool(execute)})))
-        return {'success': True, 'message': 'SLAM start sent' + ('' if execute else ' (proposals only: the robot will not move)')}
-
     def on_arm_status(self, msg):
         try:
             self.arm_status = json.loads(msg.data)
@@ -477,8 +410,6 @@ class Station(Node):
                 'supervisor': msg_dict(sup) if sup else None, 'motors': msg_dict(motors)['motors'] if motors else [],
                 'joints': dict(zip(joints.name, joints.position)) if joints else {},
                 'cameras': cams, 'arm_status': self.arm_status, 'task': self.tasks.snapshot(),
-                'slam': dict(status=self.slam, age_s=(now - self.slam_time) if self.slam_time else None,
-                             photos={k: len(v) for k, v in self.slam_photos.items()}),
                 'detect': self.detect_result, 'go': go, 'planner': self.planner_status}
 
     def api(self, path, body):
@@ -527,13 +458,6 @@ class Station(Node):
             return self.slot_plan(body)
         if path == '/api/detect':
             return self.detect_mailboxes(int(body.get('camera', 2)))
-        if path == '/api/slam/start':
-            return self.slam_start(bool(body.get('execute', True)))
-        if path == '/api/slam/stop':
-            for _ in range(3):
-                self.slam_cmd.publish(String(data=json.dumps({'cmd': 'stop'})))
-            self.base_cmd = None
-            return {'success': True, 'message': 'SLAM stop sent; the base stops, the arm is not touched'}
         if path == '/api/task/plan':
             return self.tasks.prepare(str(body['task']), float(body.get('speed_factor', 1.)), int(body.get('ocr_camera', 1)),
                                       body.get('params') or {})
@@ -610,19 +534,10 @@ def make_handler(station):
                 return self.send(200, station.page.replace('__TOKEN__', station.token).encode(),
                                  'text/html; charset=utf-8')
             params = dict(p.partition('=')[::2] for p in query.split('&') if p)
-            if path.startswith('/slam_box/') and path.endswith('.jpg'):
-                photo = station.slam_photos.get(path[10:-4])
-                if not self.authorized(params.get('token')) or photo is None:
-                    return self.send(404, {'error': 'no photo'})
-                return self.send(200, photo, 'image/jpeg')
             if path == '/detect_frame.jpg':
                 if not self.authorized(params.get('token')) or station.detect_frame is None:
                     return self.send(404, {'error': 'no frame'})
                 return self.send(200, station.detect_frame, 'image/jpeg')
-            if path == '/slam_frame.jpg':
-                if not self.authorized(params.get('token')) or station.slam_frame is None:
-                    return self.send(404, {'error': 'no frame'})
-                return self.send(200, station.slam_frame, 'image/jpeg')
             if path == '/ocr_frame.jpg':
                 frame = getattr(station.tasks, 'last_frame', None)
                 if not self.authorized(params.get('token')) or frame is None:
