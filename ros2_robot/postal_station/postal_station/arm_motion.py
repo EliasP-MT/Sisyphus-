@@ -164,32 +164,46 @@ class ArmMotion(Node):
         response.success = False
         try:
             self.set_status('planning', f'Planning to "{request.pose_name}"')
-            poses = self.call(self.list_poses, ListPoses.Request())
-            if not poses.success:
-                raise RuntimeError(poses.message)
-            pose = next((p for p in poses.poses if p.name == request.pose_name), None)
-            if pose is None:
-                raise RuntimeError(f'Unknown pose "{request.pose_name}"')
+            if len(request.goal_ticks) == 7:  # a computed target (e.g. the slot of a mailbox), not a stored pose
+                from types import SimpleNamespace
+                pose = SimpleNamespace(name=request.pose_name or 'target', warnings=[],
+                                       ticks=list(request.goal_ticks) + [self.measured_ticks()[7]])
+                poses = SimpleNamespace(poses=[])
+            else:
+                poses = self.call(self.list_poses, ListPoses.Request())
+                if not poses.success:
+                    raise RuntimeError(poses.message)
+                pose = next((p for p in poses.poses if p.name == request.pose_name), None)
+                if pose is None:
+                    raise RuntimeError(f'Unknown pose "{request.pose_name}"')
             if request.start_pose_name:
                 spose = next((p for p in poses.poses if p.name == request.start_pose_name), None)
                 if spose is None:
                     raise RuntimeError(f'Unknown start pose "{request.start_pose_name}"')
                 start = list(spose.ticks)
+            elif len(request.start_ticks) == 7:
+                start = list(request.start_ticks) + [self.measured_ticks()[7]]
             else:
                 start = self.measured_ticks()
             speed = request.speed_factor or 1.
+            accel, jerk = request.accel_factor or 1., request.jerk_factor or 1.
             began = time.monotonic()
             fixed = request.start_pose_name != ''
             key = None
             if fixed:  # pose-to-pose legs never change: computed once, kept on disk for later runs
                 ids = self.planner_ids()
-                key = f'{ids}|{list(start[:7])}|{list(pose.ticks[:7])}|{speed}'
+                key = f'{ids}|{list(start[:7])}|{list(pose.ticks[:7])}|{speed}|{accel}|{jerk}'
             if key is not None and key in self.leg_cache:
                 result = self.leg_cache[key]
                 self.get_logger().info(f'Plan to {request.pose_name}: cached leg')
             else:
-                result = self.request('/plan', {'start_ticks': start[:7], 'goal_ticks': list(pose.ticks)[:7],
-                                                'speed_factor': speed}, timeout=75.)
+                via = [list(request.via_ticks[k:k + 7]) for k in range(0, len(request.via_ticks) - 6, 7)]
+                body = {'start_ticks': start[:7], 'goal_ticks': list(pose.ticks)[:7],
+                        'speed_factor': speed, 'accel_factor': accel, 'jerk_factor': jerk}
+                if via:
+                    result = self.request('/plan_via', {**body, 'via_ticks': via}, timeout=75. * (len(via) + 1))
+                else:
+                    result = self.request('/plan', body, timeout=75.)
                 if key is not None and not result['reasons']:
                     self.leg_cache[key] = result
                     self.save_cache()
@@ -205,10 +219,12 @@ class ArmMotion(Node):
             record = dict(id=plan_id, created=time.monotonic(), start=start, pose=request.pose_name,
                           gripper=list(pose.ticks)[7], traj=traj, executable=not reasons, used=False,
                           sha=result['collision_scene_sha256'], times=result['times'],
-                          compensation=[float(c) for c in result['compensation_limit_rad']],
+                          compensation=([0.] * 7 if request.skip_compensation
+                                        else [float(c) for c in result['compensation_limit_rad']]),
                           positions=result['positions'],
                           ttl=request.valid_for_s or self.ttl,
                           start_pose=request.start_pose_name,
+                          accel_ratio=float(accel),
                           arrival_tol=float(request.arrival_tolerance_rad),
                           start_rad=float(request.start_tolerance_rad),
                           start_tol=max(13 if request.start_pose_name else self.start_tol,
@@ -221,7 +237,8 @@ class ArmMotion(Node):
             response.success, response.executable, response.plan_id = True, not reasons, plan_id
             response.reasons, response.duration_s = reasons, result['duration_s']
             response.collision_scene_sha256, response.trajectory = result['collision_scene_sha256'], traj
-            response.message = (f'Collision-free plan at {speed:g}x speed, {result["duration_s"]:.1f} s, '
+            response.message = (f'Collision-free plan at {speed:g}x speed (accel {accel:g}x, jerk {jerk:g}x), '
+                                f'{result["duration_s"]:.1f} s, '
                                 f'{len(result["times"])} checked samples, planned in {result["planning_s"]:.1f} s; '
                                 f'{result["compensation_note"]}')
             self.set_status('planned', response.message + ('' if not reasons else '; NOT executable: ' + '; '.join(reasons)))
@@ -274,6 +291,7 @@ class ArmMotion(Node):
         goal = ExecuteTrajectory.Goal(trajectory=plan['traj'], plan_id=plan['id'], collision_checked=True,
                                       collision_scene_sha256=plan['sha'],
                                       compensation_limit_rad=plan['compensation'],
+                                      acceleration_ratio=plan.get('accel_ratio', 0.),
                                       arrival_tolerance_rad=plan.get('arrival_tol', 0.),
                                       start_tolerance_rad=plan.get('start_rad', 0.))
         feedback = GoToPose.Feedback()

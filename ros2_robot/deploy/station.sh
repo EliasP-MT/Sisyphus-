@@ -11,6 +11,7 @@ REPO=$(cd "$HERE/.." && pwd)
 ROBOT_WIFI_IP=${ROBOT_WIFI_IP:-172.20.10.3}
 CALIBRATION=${CALIBRATION:-$REPO/arm_control/calibration-candidate-20261115-105050-197423.local.json}
 SCENE=${SCENE:-$REPO/arm_control/assets/rover-fixed.local/rover-scene.local.json}
+[[ -z ${CAMERA_MOUNT:-} && -f $REPO/arm_control/camera-mount.local.json ]] && CAMERA_MOUNT=$REPO/arm_control/camera-mount.local.json
 PC_IP=$(ip -4 route get "$ROBOT_WIFI_IP" | sed -n 's/.* src \([0-9.]*\).*/\1/p')
 DEV=$(ip -4 route get "$ROBOT_WIFI_IP" | sed -n 's/.* dev \([^ ]*\).*/\1/p')
 [[ -n $PC_IP ]] || { echo "No route to the robot Wi-Fi address $ROBOT_WIFI_IP" >&2; exit 1; }
@@ -21,7 +22,8 @@ sed -e "s/@PC_IP@/$PC_IP/g" -e "s/@ROBOT_IP@/$ROBOT_WIFI_IP/g" "$HERE/deploy/fas
 echo "Station DDS on $DEV ($PC_IP) -> robot $ROBOT_WIFI_IP, domain ${ROS_DOMAIN_ID:-43}"
 
 "$REPO/arm_control/.venv/bin/python" "$HERE/postal_station/planner_worker/worker.py" \
-  --calibration "$CALIBRATION" --scene "$SCENE" > "$HERE/.station_ws/planner.log" 2>&1 &
+  --calibration "$CALIBRATION" --scene "$SCENE" ${CAMERA_MOUNT:+--camera-mount "$CAMERA_MOUNT"} \
+  > "$HERE/.station_ws/planner.log" 2>&1 &
 WORKER=$!
 OCR_PY=$REPO/base_ocr/.venv/bin/python
 OCR=""

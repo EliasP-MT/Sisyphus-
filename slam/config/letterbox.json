@@ -1,0 +1,15 @@
+{
+  "label_width_m": 0.06,
+  "label_height_m": 0.048,
+  "slot_from_label_center_m": [
+    0.163,
+    0.0,
+    0.0
+  ],
+  "slot_width_m": 0.23,
+  "slot_height_m": 0.07,
+  "box_width_m": 0.305,
+  "box_height_m": 0.09,
+  "box_depth_m": 0.25,
+  "note": "Front face 25x9 cm. Label outer border 6x5 cm, 1-7 cm from the box's left edge, vertically centred. Slot 14.5x5 cm, 8-22.5 cm from the left, vertically centred. Offset is in the label frame: x right, y down, z into the box (OpenCV convention)."
+}

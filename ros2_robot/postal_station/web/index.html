@@ -52,9 +52,45 @@ progress{width:100%}.banner{padding:8px 10px;border-radius:6px;margin:4px 0}.ban
   <div id="ocrBox" class="row" hidden>
     <img id="ocrImg" alt="frame read" style="height:90px;border-radius:6px;border:1px solid var(--line)">
     <div><div class="muted">Name read on the card</div><div id="ocrName" style="font-size:22px;font-weight:700"></div><div id="ocrInfo" class="muted"></div></div></div>
+  <div class="row" id="taskParams" hidden>Recipient <input type="text" id="insRecipient" list="insNames" placeholder="name on the mailbox" style="width:12em"><datalist id="insNames"></datalist>
+    Front <input type="number" id="insFront" value="10" min="3" max="40" step="1" style="width:4.5em"> cm
+    Left offset <input type="number" id="insLeft" value="3" min="-10" max="10" step="0.5" style="width:4.5em"> cm
+    Depth inside <input type="number" id="insDepth" value="5" min="0" max="15" step="1" style="width:4.5em"> cm
+    Fingertips <input type="number" id="insTcp" value="10.6" min="0" max="20" step="0.1" style="width:4.5em"> cm
+    Pivot J7 <select id="insPivot"><option value="90" selected>+90°</option><option value="-90">−90°</option></select>
+    <span class="muted">from the scan orientation; the arm must be at <b>scan</b> (gripper closed)</span></div>
   <div id="taskMsg" class="muted"></div>
   <ol id="taskSteps" style="margin:6px 0;padding-left:22px"></ol>
   <div class="muted">Plan covers the whole sequence before anything moves (first leg from the current pose, the others between stored poses). Start only runs the precomputed plans; any failure stops the dispenser and holds the arm.</div>
+</section>
+
+<section class="wide" id="detectBox"><h2>Mailbox detection — camera 2</h2>
+  <div class="row"><button id="detectRun" class="primary">Detect mailboxes (camera 2)</button>
+    <span class="muted">One click: takes the current camera 2 image and finds every mailbox label in it. The robot does not move.</span></div>
+  <div id="detectMsg" class="muted"></div>
+  <div class="row" style="align-items:flex-start">
+    <img id="detectImg" alt="detection" hidden style="max-width:min(100%,640px);border-radius:6px;border:1px solid var(--line)">
+    <div class="scroll"><table id="detectTable" hidden><thead><tr><th class="l">Go</th><th class="l">#</th><th class="l">Name</th><th>Distance</th><th>x (cm)</th><th>y (cm)</th><th>z (cm)</th><th>Area px²</th><th>Reproj px</th><th class="l">Pose</th><th>Slot in arm frame (cm)</th></tr></thead><tbody></tbody></table>
+      <div class="row" id="slotCtl" hidden>Standoff <input type="number" id="slotStandoff" value="5" min="-15" max="50" step="1" style="width:4.5em"> cm in front of the slot (negative = inside the box)
+        Fingertips <input type="number" id="slotTcp" value="10.6" min="0" max="20" step="0.1" style="width:4.5em"> cm from Gripper_Base
+        Pivot J7 from the <b>scan</b> orientation <select id="slotPivot"><option value="0">none</option><option value="90" selected>+90°</option><option value="-90">−90°</option></select>
+        <button id="slotPlan" class="primary">Plan to the slot of the selected label</button></div>
+      <div class="muted" id="slotMsg"></div></div></div>
+</section>
+
+<section class="wide" id="slamBox"><h2>SLAM — mailbox map</h2>
+  <div class="row"><span id="slamPhase" class="pill">?</span> <b id="slamBoxes"></b>
+    <button id="slamRun" class="primary">Map the mailboxes (the base moves)</button>
+    <button id="slamDry">Observe only (no motion)</button>
+    <button id="slamStop" class="danger">Stop</button></div>
+  <progress id="slamProgress" max="1" value="0" hidden></progress>
+  <div id="slamMsg" class="muted"></div>
+  <div class="row" style="align-items:flex-start">
+    <canvas id="slamMap" width="440" height="440" style="border:1px solid var(--line);border-radius:6px;background:#fbfcfd;max-width:100%"></canvas>
+    <img id="slamImg" alt="last SLAM frame" hidden style="height:150px;border-radius:6px;border:1px solid var(--line)">
+    <div class="scroll" style="flex:1;min-width:300px"><table id="slamTable"><thead><tr><th class="l">Box</th><th class="l">Photo</th><th class="l">Name</th><th>x (m)</th><th>y (m)</th><th>z (m)</th><th>Facing</th><th>Views</th></tr></thead><tbody></tbody></table>
+    <div id="slamSource" class="muted"></div></div></div>
+  <div class="muted">Steps: place the robot facing the wall <b>at the reading distance</b> (it keeps that distance). It slides 1.5 m to the right (heading unchanged, arm stays at <b>scan</b>), finds every box and reads the names on this first pass. Only boxes whose name could not be read are then visited again, one by one, from the same distance. The map (names + positions relative to the start pose) is saved on the robot only when the whole survey completes. Clear the area first: there is no obstacle avoidance.</div>
 </section>
 
 <section class="wide"><h2>Cameras</h2>
@@ -71,7 +107,10 @@ progress{width:100%}.banner{padding:8px 10px;border-radius:6px;margin:4px 0}.ban
     <button id="armOff" class="danger">Disable</button></div>
   <div class="scroll"><table id="poses"><thead><tr><th class="l"></th><th class="l">Pose</th><th class="l">Recorded</th><th class="l">Warnings</th></tr></thead><tbody></tbody></table></div>
   <div class="row">Speed <input type="number" id="speed" value="1" min="0.1" max="2" step="0.1" style="width:5em">× calibrated
-    <span class="muted">(0.1–2; collision path unchanged)</span></div>
+    Accel <input type="number" id="accelF" value="1" min="0.1" max="4" step="0.1" style="width:5em">×
+    Jerk <input type="number" id="jerkF" value="1" min="0.1" max="4" step="0.1" style="width:5em">×
+    Arrival tolerance <input type="number" id="arrTol" value="0.03" min="0.01" max="0.08" step="0.01" style="width:5em"> rad
+    <span class="muted">(speed 0.1–2 scales the velocity only; accel and jerk default to the calibrated values, which keeps the servo torque peaks down)</span></div>
   <div class="row"><button id="plan" class="primary">Plan to selected</button>
     <label><input type="checkbox" id="withGripper"> then gripper</label>
     <button id="execute" disabled>Execute plan</button><button id="cancel" class="danger">Cancel motion</button></div>
@@ -201,6 +240,8 @@ function render() {
   if (st.message) $('planBox').dataset.status = st.stage + ': ' + st.message;
   renderPlan();
   renderTask(s.task);
+  renderSlam(s.slam);
+  renderDetect(s.detect);
 }
 function renderTask(t) {
   if (!t) return;
@@ -215,6 +256,8 @@ function renderTask(t) {
   $('taskMsg').innerHTML = `<b class="${{ready: 'ok', done: 'ok', failed: 'bad', canceled: 'bad'}[t.phase] || ''}">${esc(t.phase)}</b> ${esc(t.message)}` +
     (t.phase === 'ready' && t.prepared_age_s !== null ? ` <span class="muted">(planned ${Math.round(t.prepared_age_s)} s ago, valid 10 min)</span>` : '');
   $('taskPlan').disabled = busy;
+  $('taskParams').hidden = !['insert_letter', 'pick_deliver'].includes($('taskSel').value);
+  if (document.activeElement !== $('insRecipient')) { const names = (state && state.detect ? state.detect.labels : []).map(l => l.name).filter(Boolean); $('insNames').innerHTML = names.map(n => `<option value="${esc(n)}">`).join(''); }
   $('taskPlan').textContent = t.phase === 'failed' || t.phase === 'canceled' ? 'Retry plan' : 'Plan';
   $('taskSpeedIn').disabled = busy;
   $('taskStart').disabled = t.phase !== 'ready';
@@ -227,6 +270,110 @@ function renderOcr(o) {
   $('ocrName').className = o.success && o.name ? 'ok' : 'bad';
   $('ocrInfo').textContent = (o.success ? `camera ${o.camera}, ${o.seconds} s` : o.message) + ' · ' + new Date(o.time * 1000).toLocaleTimeString();
   if (o.frame_id && o.frame_id !== ocrFrame) { ocrFrame = o.frame_id; $('ocrImg').src = `/ocr_frame.jpg?token=${encodeURIComponent(TOKEN)}&t=${o.frame_id}`; }
+}
+let detectFrameId = 0, slotLabel = null;
+function renderDetect(d) {
+  if (!d) return;
+  const named = d.labels.filter(l => l.name).length;
+  $('detectMsg').textContent = `camera ${d.camera}: ${d.labels.length} label${d.labels.length === 1 ? '' : 's'}, ${named} named · ${d.seconds} s · ${new Date(d.time * 1000).toLocaleTimeString()}`;
+  $('detectTable').hidden = !d.labels.length;
+  if (slotLabel === null && d.labels.length) slotLabel = d.labels[0].id;
+  $('slotCtl').hidden = !d.labels.some(l => l.slot_base_m);
+  $('detectTable').tBodies[0].innerHTML = d.labels.map(l => `<tr><td class="l"><input type="radio" name="slotpick" value="${l.id}" ${l.id === slotLabel ? 'checked' : ''} ${l.slot_base_m ? '' : 'disabled'}></td><td class="l">${l.id}</td><td class="l ${l.name ? 'ok' : 'muted'}"><b>${esc(l.name || '—')}</b>${l.ocr_text && !l.name ? ' <span class="muted">(read “' + esc(l.ocr_text) + '”, no match)</span>' : ''}</td><td>${fmt(l.distance_m * 100, 0)} cm</td>` +
+    `<td>${fmt(l.center_m[0] * 100, 1)}</td><td>${fmt(l.center_m[1] * 100, 1)}</td><td>${fmt(l.center_m[2] * 100, 1)}</td>` +
+    `<td>${l.area_px2}</td><td>${l.reprojection_px}</td><td class="l ${l.ambiguous_poses ? 'warn' : ''}">${l.ambiguous_poses ? '2 candidate poses' : 'unique'}</td>` +
+    `<td>${l.slot_base_m ? l.slot_base_m.map(v => fmt(v * 100, 1)).join(' · ') : '<span class="muted">n/a</span>'}</td></tr>`).join('');
+  for (const r of document.querySelectorAll('input[name=slotpick]')) r.onchange = () => { slotLabel = parseInt(r.value); };
+  if (d.frame_id !== detectFrameId) { detectFrameId = d.frame_id; $('detectImg').hidden = false; $('detectImg').src = `/detect_frame.jpg?token=${encodeURIComponent(TOKEN)}&t=${d.frame_id}`; }
+}
+let slamFrameKey = '';
+// Top-down map, robot start pose at the origin: x forward (up), y left (left). Box 25 x 30.5 cm
+// footprint from the label frame (x right of the face, z into the box).
+function drawSlamMap(boxes, st) {
+  const cv = $('slamMap'), g = cv.getContext('2d'), W = cv.width, H = cv.height;
+  const cs = getComputedStyle(document.documentElement);
+  g.clearRect(0, 0, W, H);
+  const rot = (v) => [-v[1], -v[0]];                 // (x fwd, y left) -> screen offset (right, down)
+  const shapes = boxes.map(b => {
+    const T = b.T_map_tag, n0 = b.outward_normal_xyz;
+    if (!T || !n0) return null;
+    const hn = Math.hypot(n0[0], n0[1]) || 1, n = [n0[0] / hn, n0[1] / hn];  // face normal, towards the viewer
+    const right = [-n[1], n[0]];                      // the viewer's right along the face (label x)
+    const t = [T[0][3], T[1][3]];                      // label centre
+    // Box front face 30.5 cm wide, 25 cm deep (slam/config/letterbox.json); the label centre is taken
+    // 4 cm from the left edge, so the face centre is 11.25 cm to its right.
+    const c = [t[0] + 0.1125 * right[0] - 0.125 * n[0], t[1] + 0.1125 * right[1] - 0.125 * n[1]];
+    const pts = [[-1, 1], [1, 1], [1, -1], [-1, -1]].map(([i, j]) =>
+      [c[0] + i * 0.1525 * right[0] + j * 0.125 * n[0], c[1] + i * 0.1525 * right[1] + j * 0.125 * n[1]]);
+    return {b, c, pts, label: t, n};
+  }).filter(Boolean);
+  let ext = 0.6;
+  shapes.forEach(s => s.pts.forEach(p => { ext = Math.max(ext, Math.abs(p[0]), Math.abs(p[1])); }));
+  ext = Math.ceil((ext + 0.1) * 4) / 4;
+  const sc = (Math.min(W, H) / 2 - 18) / ext, cx = W / 2, cy = H / 2;
+  const P = p => { const r = rot(p); return [cx + r[0] * sc, cy + r[1] * sc]; };
+  g.font = '11px system-ui'; g.lineWidth = 1;
+  for (let m = -ext; m <= ext + 1e-6; m += 0.25) {       // 25 cm grid
+    g.strokeStyle = Math.abs(m) < 1e-6 ? '#9aa3b2' : '#e3e6ec';
+    let a = P([m, -ext]), b = P([m, ext]); g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+    a = P([-ext, m]); b = P([ext, m]); g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+    if (Math.abs(m % 0.5) < 1e-6 && Math.abs(m) > 1e-6) { g.fillStyle = '#8a93a3'; const l = P([m, -ext]); g.fillText(m.toFixed(1) + ' m', l[0] + 2, cy + 12); }
+  }
+  g.fillStyle = '#8a93a3'; g.fillText('x fwd', cx + 4, 12); g.fillText('y left', 6, cy - 6);
+  const failed = (st && st.failed) || {}, target = st && st.target_id;
+  shapes.forEach(s => {
+    const named = !!s.b.name, bad = failed[s.b.id];
+    g.beginPath(); s.pts.forEach((p, i) => { const q = P(p); i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]); }); g.closePath();
+    g.fillStyle = named ? 'rgba(17,130,59,.18)' : 'rgba(120,130,150,.18)'; g.fill();
+    g.lineWidth = s.b.id === target ? 3 : 1.5; g.strokeStyle = bad ? '#c4262e' : (named ? '#11823b' : '#667085'); g.stroke();
+    const q0 = P(s.pts[0]), q1 = P(s.pts[1]);                   // the face the label is on
+    g.beginPath(); g.moveTo(q0[0], q0[1]); g.lineTo(q1[0], q1[1]); g.lineWidth = 4; g.strokeStyle = '#2457c5'; g.stroke();
+    const lp = P([s.label[0], s.label[1]]); g.fillStyle = '#2457c5'; g.beginPath(); g.arc(lp[0], lp[1], 3, 0, 7); g.fill();
+    const cp = P(s.c); g.fillStyle = '#1d2330'; g.font = 'bold 11px system-ui';
+    g.fillText((s.b.name || s.b.id.replace('mailbox_', '#')) + ' z' + Math.round(((s.b.position_xyz_m || [0, 0, 0])[2]) * 100), cp[0] - 22, cp[1] + 4);
+  });
+  const o = P([0, 0]);                                              // robot: Kiwi base at the start pose
+  g.beginPath(); g.arc(o[0], o[1], 0.12 * sc, 0, 7); g.fillStyle = 'rgba(36,87,197,.15)'; g.fill();
+  g.lineWidth = 2; g.strokeStyle = '#2457c5'; g.stroke();
+  const f = P([0.2, 0]); g.beginPath(); g.moveTo(o[0], o[1]); g.lineTo(f[0], f[1]); g.stroke();
+  g.fillStyle = '#2457c5'; g.font = '11px system-ui'; g.fillText('start', o[0] + 8, o[1] + 14);
+}
+function renderSlam(slam) {
+  const st = slam && slam.status, alive = st && slam.age_s !== null && slam.age_s < 3;
+  if (!alive) {
+    pill($('slamPhase'), 'SLAM node: not answering', 'bad');
+    $('slamMsg').textContent = 'The SLAM service on the robot is not publishing (systemctl --user status postal-slam).';
+    $('slamRun').disabled = $('slamDry').disabled = true;
+    return;
+  }
+  const active = !!st.active, phase = st.phase || '?';
+  pill($('slamPhase'), phase, ['complete'].includes(phase) ? 'ok' : (['fault', 'refused', 'incomplete', 'stopped'].includes(phase) ? 'bad' : (active ? 'warn' : '')));
+  $('slamRun').disabled = $('slamDry').disabled = active;
+  const live = (st.mailboxes || []).length || active || ['complete', 'fault', 'stopped', 'incomplete'].includes(phase);
+  const boxes = live ? (st.mailboxes || []) : ((st.stored_map && st.stored_map.mailboxes) || []);
+  drawSlamMap(boxes, live ? st : {});
+  $('slamBoxes').textContent = `${boxes.length} box${boxes.length === 1 ? '' : 'es'}`;
+  const p = st.scan_fraction !== undefined ? st.scan_fraction : Math.min(1, (st.scan_progress_rad || 0) / (2 * Math.PI));
+  $('slamProgress').hidden = !(active || p > 0); $('slamProgress').value = p;
+  const bits = [];
+  if (st.reason) bits.push(esc(st.reason));
+  if (st.error) bits.push('<b class="bad">' + esc(st.error) + '</b>');
+  if (st.blockers && st.blockers.length && !active) bits.push('blockers: ' + esc(st.blockers.join('; ')));
+  if (st.target_id) bits.push('target ' + esc(st.target_id));
+  if (st.reading_distance_m) bits.push(`first pass at ${(st.reading_distance_m * 100).toFixed(0)} cm from the wall` + (st.second_pass_standoff_m ? `; second pass (unread boxes) at ${(st.second_pass_standoff_m * 100).toFixed(0)} cm` : ''));
+  if (st.execution_enabled === false && active) bits.push('<b class="warn">observe only: the base does not move</b>');
+  (st.geometry_warnings || []).forEach(w => bits.push('<span class="warn">' + esc(w) + '</span>'));
+  $('slamMsg').innerHTML = bits.join('<br>');
+  $('slamTable').tBodies[0].innerHTML = boxes.map(b => {
+    const n = b.outward_normal_xyz || [0, 0, 0], pos = b.position_xyz_m || [0, 0, 0];
+    const ph = (slam.photos || {})[b.id];
+    const photo = ph ? `<img src="/slam_box/${encodeURIComponent(b.id)}.jpg?token=${encodeURIComponent(TOKEN)}&v=${ph}" alt="${esc(b.id)}" style="height:64px;border-radius:4px;border:1px solid var(--line)">` : '<span class="muted">no photo</span>';
+    return `<tr><td class="l">${esc(b.id)}</td><td class="l">${photo}</td><td class="l ${b.name ? 'ok' : 'muted'}"><b>${esc(b.name || '—')}</b></td>` +
+      `<td>${fmt(pos[0], 3)}</td><td>${fmt(pos[1], 3)}</td><td>${fmt(pos[2], 3)}</td><td>${fmt(Math.atan2(n[1], n[0]) * 180 / Math.PI, 0)}°</td><td>${b.observations ?? ''}</td></tr>`;
+  }).join('');
+  $('slamSource').textContent = live ? 'live map of this run' : (st.stored_map ? 'saved map, ' + new Date(st.stored_map.saved_at * 1000).toLocaleString() : 'no saved map yet');
+  const key = phase + ':' + (st.scan_fraction || 0).toFixed(2) + ':' + boxes.length;
+  if (active && key !== slamFrameKey) { slamFrameKey = key; $('slamImg').hidden = false; $('slamImg').src = `/slam_frame.jpg?token=${encodeURIComponent(TOKEN)}&t=${Date.now()}`; }
 }
 function renderPlan() {
   const st = $('planBox').dataset.status || '';
@@ -255,10 +402,41 @@ async function loadPoses() {
   for (const r of document.querySelectorAll('input[name=pose]')) r.onchange = () => { selected = r.value; plan = null; renderPlan(); };
 }
 
-$('taskPlan').onclick = () => act('/api/task/plan', {task: $('taskSel').value, speed_factor: parseFloat($('taskSpeedIn').value) || 1, ocr_camera: parseInt($('ocrCam').value)}, 'task plan');
+function taskParams() {
+  if (!['insert_letter', 'pick_deliver'].includes($('taskSel').value)) return {};
+  return {recipient: $('insRecipient').value, front_cm: parseFloat($('insFront').value), depth_cm: parseFloat($('insDepth').value), left_cm: parseFloat($('insLeft').value),
+          tcp_offset_cm: parseFloat($('insTcp').value), pivot_deg: parseFloat($('insPivot').value)};
+}
+$('taskSel').onchange = () => { $('taskParams').hidden = !['insert_letter', 'pick_deliver'].includes($('taskSel').value); };
+$('taskPlan').onclick = () => act('/api/task/plan', {task: $('taskSel').value, speed_factor: parseFloat($('taskSpeedIn').value) || 1, ocr_camera: parseInt($('ocrCam').value), params: taskParams()}, 'task plan', 150000);
 $('ocrNow').onclick = () => act('/api/task/ocr', {camera: parseInt($('ocrCam').value)}, 'read card', 130000);
 $('taskStart').onclick = () => act('/api/task/start', {}, 'task start');
 $('taskStop').onclick = () => act('/api/task/stop', {}, 'task stop');
+$('slotPlan').onclick = async () => {
+  if (slotLabel === null) { log('Pick a label first', 'bad'); return; }
+  $('slotPlan').disabled = true; $('slotMsg').textContent = 'planning…';
+  const body = {label_id: slotLabel, standoff_cm: parseFloat($('slotStandoff').value), tcp_offset_cm: parseFloat($('slotTcp').value),
+                pivot_deg: parseFloat($('slotPivot').value), speed_factor: parseFloat($('speed').value) || 1};
+  const r = await act('/api/slot/plan', body, `plan to the slot of #${slotLabel}`, 130000);
+  $('slotPlan').disabled = false;
+  if (r.success) {
+    plan = {...r, pose: `slot #${slotLabel}`, used: false}; renderPlan();
+    $('slotMsg').innerHTML = `<b class="${r.executable ? 'ok' : 'bad'}">${r.executable ? 'Executable' : 'Not executable'}</b>: fingertips to ${r.target_xyz_m.map(v => fmt(v * 100, 1)).join(' · ')} cm (slot at ${r.slot_base_m.map(v => fmt(v * 100, 1)).join(' · ')}), ` +
+      `position error ${fmt(r.ik.position_error_m * 1000, 1)} mm, axis ${fmt(r.ik.axis_error_deg, 0)}° off the line of sight — preview in RViz, then “Execute plan” in the arm panel.`;
+  } else { $('slotMsg').innerHTML = '<span class="bad">' + esc(r.message || r.error || 'failed') + '</span>'; }
+};
+$('detectRun').onclick = async () => {
+  $('detectRun').disabled = true;
+  const r = await act('/api/detect', {camera: 2}, 'mailbox detection', 120000);
+  $('detectRun').disabled = false;
+  if (r.success === false) $('detectMsg').textContent = r.message;
+};
+$('slamRun').onclick = () => {
+  if (!confirm('The base will slide 1.5 m to the right along the wall, reading the names on the way (it keeps its distance to the wall). Start facing the wall at the reading distance, with 1.5 m free on its right. The arm must be at "scan". Clear the area (no obstacle avoidance). Start?')) return;
+  act('/api/slam/start', {execute: true}, 'slam start');
+};
+$('slamDry').onclick = () => act('/api/slam/start', {execute: false}, 'slam observe');
+$('slamStop').onclick = () => act('/api/slam/stop', {}, 'slam stop');
 $('ack').onclick = () => act('/api/ack', {}, 'acknowledge');
 $('armOn').onclick = () => act('/api/torque', {group: 'arm', enable: true}, 'arm torque on');
 $('armOff').onclick = () => {
@@ -300,7 +478,8 @@ $('plan').onclick = async () => {
   if (!(speed >= 0.1 && speed <= 2)) { log('Speed must be between 0.1 and 2', 'bad'); $('plan').disabled = false; return; }
   const began = Date.now(), tick = setInterval(() => {
     $('planBox').dataset.status = `planning… ${Math.round((Date.now() - began) / 1000)} s`; renderPlan(); }, 1000);
-  const r = await act('/api/plan', {pose: selected, speed_factor: speed}, `plan ${selected} at ${speed}x`, 110000);
+  const accelF = parseFloat($('accelF').value) || 1, jerkF = parseFloat($('jerkF').value) || 1;
+  const r = await act('/api/plan', {pose: selected, speed_factor: speed, accel_factor: accelF, jerk_factor: jerkF, arrival_tolerance_rad: parseFloat($('arrTol').value) || 0}, `plan ${selected} at ${speed}x (accel ${accelF}x, jerk ${jerkF}x)`, 110000);
   clearInterval(tick);
   if (!r.success) { $('planBox').dataset.status = 'planning failed: ' + r.message; renderPlan(); }
   $('plan').disabled = false;

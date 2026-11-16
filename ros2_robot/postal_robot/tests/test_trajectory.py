@@ -138,6 +138,12 @@ class CompensationTests(unittest.TestCase):
         r, _ = self.run_relaxed(.03)                              # sag 0.04 above the accepted tolerance
         self.assertEqual(r.state, ABORTED)
 
+    def test_a_failed_arrival_names_the_joint_and_its_offset(self):
+        r, _, _ = self.simulate([0, 0, 0, .01, 0, 0, 0])  # bound far below the 0.03 sag of J4
+        self.assertEqual(r.state, ABORTED)
+        self.assertIn('worst joint J4', r.message)
+        self.assertIn('offset', r.message)
+
     def test_without_compensation_reports_failure(self):
         r, _, _ = self.simulate(None)
         self.assertEqual(r.state, ABORTED)
@@ -166,6 +172,77 @@ class SpeedFactorTests(unittest.TestCase):
         times, points = plan(c, steps=5, dt=.1, delta=.05)  # 0.5 rad/s > 2x ceiling
         with self.assertRaises(TrajectoryError):
             TrajectoryRun(c, JOINTS, times, points, max_speed_factor=2.)
+
+
+class LoadGuardTests(unittest.TestCase):
+    def play(self, loads_at, limit=200, seconds=30., **kw):
+        """Follow the plan perfectly while the servo loads are given by loads_at(t)."""
+        c = calibration()
+        times, points = plan(c, steps=21, dt=.5, delta=.02)  # 10 s long
+        r = TrajectoryRun(c, JOINTS, times, points, load_limit_raw=limit, arrival_timeout=20., **kw)
+        r.begin(points[0], 0.)
+        t, history = 0., []
+        while r.state == RUNNING and t < seconds:
+            reference = points[max(r.commanded, 0)]
+            r.step(t, list(reference), loads_at(t))
+            history.append((t, r.rate, r.virtual))
+            t += .05
+        return r, history, t
+
+    def test_light_load_plays_at_full_speed(self):
+        r, history, t = self.play(lambda t: [30, 100, 20, 0, 0, 0, 0])
+        self.assertEqual(r.state, SUCCEEDED, r.message)
+        self.assertEqual(min(h[1] for h in history), 1.)
+        self.assertLess(t, 11.5)  # the 10 s plan took about 10 s
+
+    def test_a_high_load_slows_the_playback_and_the_run_still_finishes(self):
+        # J2 at 80 % of its threshold for the middle of the motion: slower, but it arrives.
+        r, history, t = self.play(lambda t: [0, 160 if 3 < t < 8 else 60, 0, 0, 0, 0, 0])
+        self.assertEqual(r.state, SUCCEEDED, r.message)
+        self.assertLess(min(h[1] for h in history), .8)
+        self.assertGreater(t, 12.)  # it took visibly longer than the plan
+        self.assertIn('slowed', r.message)
+
+    def test_a_load_that_stays_at_the_threshold_holds_the_arm_before_the_servo_trips(self):
+        r, history, t = self.play(lambda t: [0, 195 if t > 4 else 50, 0, 0, 0, 0, 0])
+        self.assertEqual(r.state, ABORTED)
+        self.assertIn('Load guard: J2', r.message)
+        self.assertIn('held before the servo protection trips', r.message)
+
+    def test_guard_is_off_without_a_limit_or_loads(self):
+        c = calibration()
+        times, points = plan(c)
+        r = TrajectoryRun(c, JOINTS, times, points)
+        r.begin(points[0], 0.)
+        r.step(.05, list(points[0]), [0, 999, 0, 0, 0, 0, 0])  # no limit configured
+        self.assertEqual(r.state, RUNNING)
+        self.assertEqual(r.rate, 1.)
+
+
+class PerJointLimitTests(unittest.TestCase):
+    def test_a_slower_joint_limit_refuses_a_plan_that_is_fine_for_the_others(self):
+        c = calibration()
+        times, points = plan(c, steps=5, dt=.1, delta=.02)  # joint 1 at 0.2 rad/s
+        TrajectoryRun(c, JOINTS, times, points, max_speed_factor=2.)  # accepted with default limits
+        c.data['joint_limits'] = {'velocity_scale': [0.5, 1, 1, 1, 1, 1, 1]}
+        with self.assertRaises(TrajectoryError):
+            TrajectoryRun(c, JOINTS, times, points, max_speed_factor=1.)
+
+    def test_speed_ratio_is_measured_against_each_joints_own_limit(self):
+        c = calibration()
+        times, points = plan(c, steps=5, dt=.1, delta=.01)  # 0.1 rad/s on joint 1
+        base = TrajectoryRun(c, JOINTS, times, points, max_speed_factor=2.)
+        c.data['joint_limits'] = {'velocity_scale': [0.5, 1, 1, 1, 1, 1, 1]}
+        slow_joint = TrajectoryRun(c, JOINTS, times, points, max_speed_factor=2.)
+        self.assertEqual(base.speed_ratio, 1.)
+        self.assertGreater(slow_joint.speed_ratio, base.speed_ratio)  # 0.1 rad/s is 1.4x of 0.073
+
+    def test_invalid_scales_are_rejected(self):
+        c = calibration()
+        for bad in ([1] * 6, [1, 1, 1, 1, 1, 1, 0], [1, 1, 1, 1, 1, 1, 5], 'x'):
+            c.data['joint_limits'] = {'velocity_scale': bad}
+            with self.assertRaises(TrajectoryError):
+                TrajectoryRun(c, JOINTS, *plan(c))
 
 
 class TrackingScalingTests(unittest.TestCase):

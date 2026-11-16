@@ -96,6 +96,7 @@ class Core(Node):
         p('arrival_timeout_s', 20.)
         p('max_compensation_rad', .06)
         p('max_speed_factor', 2.)
+        p('overload_load_raw', 200)  # raw servo load (0-1000) at which the servo's own protection trips; 0 = guard off
         p('stationary_speed_ticks_s', 10)
         p('publish_odom_tf', False)
         g = lambda name: self.get_parameter(name).value
@@ -128,7 +129,7 @@ class Core(Node):
                                       'dispenser_default_speed', 'dispenser_max_duration_s',
                                       'gripper_min_ticks', 'gripper_max_ticks', 'gripper_speed_ticks_s',
                                       'start_tolerance_rad', 'arrival_tolerance_rad', 'arrival_timeout_s',
-                                      'stationary_speed_ticks_s', 'publish_odom_tf', 'max_compensation_rad', 'max_speed_factor')}
+                                      'stationary_speed_ticks_s', 'publish_odom_tf', 'max_compensation_rad', 'max_speed_factor', 'overload_load_raw')}
         if not 0 < abs(self.cfg['dispenser_default_speed']) <= 1000:
             raise ValueError('Dispenser default speed must be within -1000..1000 and non-zero')
         if not 0 < self.cfg['dispenser_max_duration_s'] <= 60:
@@ -458,6 +459,16 @@ class Core(Node):
                     self._safe_stop('dispenser stop failure')
 
     # ------------------------------------------------------------------ arm
+    def _arm_loads(self):
+        """Raw loads of the seven arm servos from their latest valid reply (None if unavailable)."""
+        loads = []
+        for i in range(1, 8):
+            data = self.motors[i].data
+            if not data:
+                return None
+            loads.append(data['load'])
+        return loads
+
     def _arm_step(self):
         run = self.run
         if run is None:
@@ -467,7 +478,7 @@ class Core(Node):
         elif not self.supervisor.commands_allowed():
             run._abort('Supervisor no longer active')
         else:
-            goals = run.step(time.monotonic(), self._arm_radians())
+            goals = run.step(time.monotonic(), self._arm_radians(), self._arm_loads())
             if goals:
                 try:
                     for i, value in zip(range(1, 8), goals):
@@ -816,6 +827,7 @@ class Core(Node):
                                 arrival_timeout=self.cfg['arrival_timeout_s'],
                                 max_step_gap=max(.25, 4 * self.period),
                                 max_speed_factor=self.cfg['max_speed_factor'],
+                                load_limit_raw=self.cfg['overload_load_raw'] or None,
                                 compensation=[min(c, self.cfg['max_compensation_rad'])
                                               for c in goal.compensation_limit_rad] or None)
 
@@ -834,8 +846,16 @@ class Core(Node):
                 if measured is None:
                     raise RuntimeError('Fresh arm feedback unavailable')
                 c = self.calibration.data
-                base, cap = c['servo_speed_ticks_s'], c['servo_speed_ticks_s'] * self.cfg['max_speed_factor']
-                accel = int(min(254, math.ceil(c['servo_acceleration'] * run.speed_ratio ** 2)))
+                vscale = max(run.velocity_scale)
+                # The ceiling must leave the 25 % headroom above the fastest plan the trajectory check
+                # accepts (max_speed_factor x velocity margin): with cap == plan speed the servo
+                # cannot catch up on any lag and the tracking error only grows.
+                base = c['servo_speed_ticks_s']
+                cap = base * self.cfg['max_speed_factor'] * vscale * run.velocity_margin
+                # Servo acceleration follows the PLAN's acceleration ratio (the station sends it);
+                # 0 = an older station: legacy behaviour, speed ratio squared.
+                accel_ratio = goal.acceleration_ratio if goal.acceleration_ratio > 0 else run.speed_ratio ** 2
+                accel = int(min(254, max(1, math.ceil(c['servo_acceleration'] * min(accel_ratio, 16.)))))
                 for i, peak in zip(range(1, 8), run.peak_ticks_per_s()):
                     # Servo speed follows the plan (25 % headroom), never below the
                     # calibrated speed nor above the configured ceiling.

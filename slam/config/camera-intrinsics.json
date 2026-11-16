@@ -1,0 +1,30 @@
+{
+  "fx": 857.6923580164239,
+  "fy": 864.2852464261375,
+  "cx": 372.33053388160545,
+  "cy": 217.3586121833196,
+  "width": 640,
+  "height": 480,
+  "distortion": [
+    0.08087629290695247,
+    1.1208647413831214,
+    0.002338567141706621,
+    0.0013883837167477419,
+    -6.010714979116512
+  ],
+  "square_size_m": 0.0222,
+  "inner_corners": [
+    9,
+    6
+  ],
+  "usable_images": 25,
+  "rms_reprojection_px": 0.351,
+  "held_out_reprojection_px": [
+    0.16988173127174377,
+    0.6419717669487,
+    0.6140182018280029,
+    0.22593280673027039,
+    0.20998743176460266
+  ],
+  "note": "Intrinsics only. Camera pose and metric triangulation baseline remain unvalidated."
+}

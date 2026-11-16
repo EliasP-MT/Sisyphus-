@@ -11,9 +11,11 @@
   (deadman); one zero twist is sent on release.
 """
 import json
+import math
 import secrets
 import threading
 import time
+import urllib.error
 import urllib.request
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -26,7 +28,7 @@ from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage, JointState
 from std_msgs.msg import String
 
@@ -41,6 +43,9 @@ BEST_EFFORT = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
 def msg_dict(msg):
     from rosidl_runtime_py.convert import message_to_ordereddict
     return json.loads(json.dumps(message_to_ordereddict(msg), default=float))
+
+
+DETECT_FRAMES = 4  # frames read per mailbox detection
 
 
 class Camera:
@@ -79,6 +84,20 @@ class Station(Node):
         self.create_subscription(MotorStateArray, '/robot/motors', self.keep('motors'), 10)
         self.create_subscription(JointState, '/robot/joint_states', self.keep('joints'), qos_profile_sensor_data)
         self.create_subscription(String, '/station/arm/status', self.on_arm_status, 10)
+        self.slam, self.slam_time, self.slam_frame = None, 0., None
+        self.create_subscription(String, '/slam/status', self.on_slam_status, 10)
+        self.create_subscription(CompressedImage, '/slam/image/compressed', self.on_slam_image,
+                                 qos_profile_sensor_data)
+        self.slam_cmd = self.create_publisher(String, '/slam/command', 10)
+        self.slam_photos = {}
+        self.detect_result, self.detect_frame = None, None
+        # OCR bridge: the robot's SLAM has no OCR model; it publishes the rectified label and
+        # the PC reads it with the station OCR worker (base_ocr), then answers on /slam/ocr_result.
+        self.ocr_result_pub = self.create_publisher(String, '/slam/ocr_result', 10)
+        self.create_subscription(String, '/slam/ocr_request', self.on_ocr_request, 10)
+        self.create_subscription(String, '/slam/photos', self.on_slam_photos,
+                                 QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                                            durability=DurabilityPolicy.TRANSIENT_LOCAL))
         for i, cam in self.cameras.items():
             self.create_subscription(CompressedImage, f'/robot/camera_{i}/image/compressed', cam.update,
                                      qos_profile_sensor_data)
@@ -102,6 +121,245 @@ class Station(Node):
                 setattr(self, name, msg)
                 self.received[name] = time.time()
         return store
+
+    def on_slam_status(self, msg):
+        try:
+            self.slam, self.slam_time = json.loads(msg.data), time.time()
+        except ValueError:
+            pass
+
+    def detect_mailboxes(self, camera, frames=DETECT_FRAMES):
+        """Run the mailbox detector (+ OCR) on several successive frames of the camera and keep every
+        match: a label whose name was read in any frame keeps it (one frame alone often misses a name)."""
+        import base64
+        cam = self.cameras.get(camera)
+        if cam is None:
+            return {'success': False, 'message': f'unknown camera {camera}'}
+        began = time.time()
+        replies, last_received, error = [], 0., None
+        for _ in range(max(1, int(frames))):
+            deadline = time.time() + 1.5
+            while True:  # a frame newer than the previous one (the arm is still, the views are alike)
+                with cam.cond:
+                    jpeg, received = cam.jpeg, cam.received
+                if jpeg is not None and received > last_received:
+                    break
+                if time.time() > deadline:
+                    jpeg = None
+                    break
+                time.sleep(0.05)
+            if jpeg is None or time.time() - received > 3.:
+                error = error or f'camera {camera} has no fresh image (stream stalled?)'
+                continue
+            last_received = received
+            try:
+                http = urllib.request.Request('http://127.0.0.1:8894/detect',
+                                              json.dumps({'image_b64': base64.b64encode(jpeg).decode()}).encode(),
+                                              {'Content-Type': 'application/json'})
+                reply = json.load(urllib.request.urlopen(http, timeout=30))
+            except Exception as exc:
+                return {'success': False, 'message': f'mailbox detector unavailable (OCR worker on :8894?): {exc}'}
+            if not reply.get('success'):
+                return {'success': False, 'message': reply.get('message', 'detection failed')}
+            replies.append(reply)
+        if not replies:
+            return {'success': False, 'message': error or 'no frame processed'}
+        reply = self.merge_detections(replies)
+        self.detect_frame = base64.b64decode(reply.pop('image_b64'))
+        reply['camera'], reply['time'], reply['frame_id'] = camera, time.time(), int(time.time() * 1000)
+        reply['frames'] = len(replies)
+        try:
+            ticks = self.arm_ticks()
+            self.add_base_coordinates(reply['labels'], ticks, reply['geometry'])
+            reply['ticks'] = ticks
+        except Exception as exc:  # the detection itself is still useful without the arm coordinates
+            reply['base_error'] = str(exc)
+        self.detect_result = reply
+        n = len(reply['labels'])
+        named = sum(1 for l in reply['labels'] if l.get('name'))
+        return {'success': True, 'message': f'{n} mailbox label{"" if n == 1 else "s"} ({named} named) kept from '
+                                           f'{len(replies)} frame{"" if len(replies) == 1 else "s"} on camera {camera} '
+                                           f'in {time.time() - began:.1f} s'}
+
+    @staticmethod
+    def merge_detections(replies):
+        """Union of the labels of several frames. The frame with the most named labels is the base (its
+        image and ids); a label from another frame is the same mailbox when its centre is within 40 px,
+        and then the entry with a read name wins; labels seen only in other frames are added."""
+        import numpy as np
+
+        def centre(label):
+            return np.mean(np.asarray(label['corners_px'], float), axis=0)
+
+        def rank(label):  # a name beats none, then the better match, then the larger (closer) label
+            return (bool(label.get('name')), label.get('match_score', 0.), label.get('area_px2', 0))
+
+        base = max(replies, key=lambda r: (sum(1 for l in r['labels'] if l.get('name')), len(r['labels'])))
+        merged = [dict(l, frames_seen=1) for l in base['labels']]
+        for reply in replies:
+            if reply is base:
+                continue
+            for label in reply['labels']:
+                match = next((m for m in merged if np.linalg.norm(centre(m) - centre(label)) < 40.), None)
+                if match is None:
+                    merged.append(dict(label, id=max([m['id'] for m in merged] + [0]) + 1, frames_seen=1))
+                    continue
+                match['frames_seen'] += 1
+                if rank(label) > rank(match):
+                    keep_id, seen = match['id'], match['frames_seen']
+                    match.clear()
+                    match.update(label, id=keep_id, frames_seen=seen)
+        return dict(base, labels=merged)
+
+    # ------------------------------------------------------------------ slot targets (arm)
+    def arm_ticks(self):
+        with self.lock:
+            motors = {m.motor_id: m for m in self.motors.motors} if self.motors else {}
+        if any(i not in motors or not motors[i].fresh for i in range(1, 8)):
+            raise RuntimeError('No fresh arm feedback')
+        return [motors[i].position_ticks for i in range(1, 8)]
+
+    def wait_arm_still(self, timeout=4., speed_ticks_s=8, hold_s=.3):
+        """Wait until every arm motor has been still for hold_s (the robot refuses to start a trajectory
+        while the arm still creeps, e.g. just after the end-of-leg compensation)."""
+        deadline, still_since = time.monotonic() + timeout, None
+        while time.monotonic() < deadline:
+            with self.lock:
+                motors = {m.motor_id: m for m in self.motors.motors} if self.motors else {}
+            moving = any(i in motors and abs(motors[i].speed_ticks_s) > speed_ticks_s for i in range(1, 8))
+            if moving:
+                still_since = None
+            else:
+                still_since = still_since or time.monotonic()
+                if time.monotonic() - still_since >= hold_s:
+                    return True
+            time.sleep(.05)
+        return False
+
+    def planner_call(self, path, body, timeout=60.):
+        http = urllib.request.Request(self.planner_url + path, json.dumps(body).encode(),
+                                      {'Content-Type': 'application/json'})
+        try:
+            return json.load(urllib.request.urlopen(http, timeout=timeout))
+        except urllib.error.HTTPError as exc:
+            raise RuntimeError(json.load(exc).get('error', str(exc))) from exc
+
+    def add_base_coordinates(self, labels, ticks, geometry):
+        """Position of each label and of its slot in the arm base frame (base_link).
+
+        The slot is at the measured offset along the label's x axis; that axis is projected on the
+        horizontal plane first: the wall is vertical, so a tilt in the estimate is noise."""
+        import numpy as np
+        T = np.array(self.planner_call('/camera_pose', {'ticks': ticks})['T_base_camera'])
+        camera = T[:3, 3]
+        # The robot faces the wall: the wall is vertical and perpendicular to the camera's heading
+        # (horizontal part of its optical axis), as for the SLAM. Across the wall = perpendicular to it.
+        forward = T[:3, 2]
+        forward_h = np.array([forward[0], forward[1], 0.])
+        if np.linalg.norm(forward_h) < 0.5:
+            for label in labels:
+                label['slot_base_m'] = None  # camera looking mostly up or down: no wall heading
+            return
+        forward_h /= np.linalg.norm(forward_h)
+        across = np.array([-forward_h[1], forward_h[0], 0.])
+        for label in labels:
+            centre = (T @ np.append(label['center_m'], 1.))[:3]
+            if not label.get('orientation_known', True):
+                label['slot_base_m'] = None  # name unread: which side the slot is on is not known
+                continue
+            # The estimated 3D x axis of the label is noisy (planar ambiguity): it only gives the sign.
+            x_axis = T[:3, :3] @ np.array(label['label_rotation'])[:, 0]
+            sign = 1. if x_axis @ across >= 0 else -1.
+            slot = centre + sign * geometry['slot_from_label_center_m'][0] * across
+            label.update(label_base_m=[round(float(v), 4) for v in centre],
+                         slot_base_m=[round(float(v), 4) for v in slot],
+                         approach_dir=[round(float(v), 5) for v in forward_h],
+                         camera_base_m=[round(float(v), 4) for v in camera])
+
+    def slot_plan(self, body):
+        """Plan the fingertips to a point in front of a detected slot, J7 pivoted."""
+        d = self.detect_result
+        if not d or time.time() - d['time'] > 300:
+            return {'success': False, 'message': 'Detect the mailboxes first (and plan within 5 minutes)'}
+        label = next((l for l in d['labels'] if l['id'] == int(body['label_id'])), None)
+        if label is None or not label.get('slot_base_m'):
+            return {'success': False, 'message': 'This label has no reliable slot position (seen edge-on?)'}
+        ticks = self.arm_ticks()
+        if d.get('ticks') and max(abs(a - b) for a, b in zip(ticks, d['ticks'])) > 12:
+            return {'success': False, 'message': 'The arm moved since the detection: detect again'}
+        standoff = float(body.get('standoff_cm', 5)) / 100.
+        offset = float(body.get('tcp_offset_cm', 10.6)) / 100.
+        pivot = math.radians(float(body.get('pivot_deg', 0.)))
+        if not -0.15 <= standoff <= 0.5 or not 0 <= offset <= 0.2 or abs(pivot) > math.radians(181):
+            return {'success': False, 'message': 'standoff -15..50 cm (negative = inside the box), fingertip offset 0-20 cm, pivot within +/-180 deg'}
+        poses = self.call('list')
+        scan = next((p for p in poses.poses if p.name == 'scan'), None) if poses.success else None
+        reference = list(scan.ticks)[:7] if scan is not None else None  # the pivot is measured from the scan orientation
+        ray = label['approach_dir']
+        target = [s - standoff * r for s, r in zip(label['slot_base_m'], ray)]
+        try:
+            ik = self.planner_call('/ik_xyz', {'start_ticks': ticks, 'target_xyz_m': target,
+                                                'tcp_offset_m': [0., offset, 0.], 'approach_dir': ray,
+                                                'pivot_rad': pivot, 'pivot_reference_ticks': reference})
+        except RuntimeError as exc:
+            return {'success': False, 'message': f'Arm cannot reach it: {exc}', 'target_xyz_m': target}
+        goal = ik['goal_ticks']
+        # Wrist first: turn J7 in place to its final angle, then move the arm (never both at once).
+        via = list(ticks[:6]) + [goal[6]] if abs(goal[6] - ticks[6]) > 5 else []
+        r = self.call('plan', timeout=200., pose_name=f'slot #{label["id"]}', goal_ticks=goal, via_ticks=via,
+                      speed_factor=float(body.get('speed_factor', 1.)))
+        return {'success': r.success, 'executable': r.executable, 'plan_id': r.plan_id, 'message': r.message,
+                'reasons': list(r.reasons), 'duration_s': r.duration_s, 'points': len(r.trajectory.points),
+                'target_xyz_m': [round(v, 4) for v in target], 'slot_base_m': label['slot_base_m'],
+                'ik': {k: ik[k] for k in ('position_error_m', 'axis_error_deg', 'tip_xyz_m')}}
+
+    def on_ocr_request(self, msg):
+        threading.Thread(target=self.serve_ocr, args=(msg.data,), daemon=True).start()
+
+    def serve_ocr(self, data):
+        reply = {'id': None, 'success': False, 'message': 'malformed request'}
+        try:
+            request = json.loads(data)
+            reply['id'] = request['id']
+            http = urllib.request.Request('http://127.0.0.1:8894/regions',
+                                          json.dumps({'image_b64': request['image_b64']}).encode(),
+                                          {'Content-Type': 'application/json'})
+            reply = {'id': request['id'], **json.load(urllib.request.urlopen(http, timeout=60))}
+        except Exception as exc:
+            reply['message'] = f'station OCR failed: {exc}'
+        self.ocr_result_pub.publish(String(data=json.dumps(reply)))
+
+    def on_slam_photos(self, msg):
+        import base64
+        try:
+            self.slam_photos = {k: base64.b64decode(v) for k, v in json.loads(msg.data).items()}
+        except (ValueError, TypeError):
+            pass
+
+    def on_slam_image(self, msg):
+        self.slam_frame = bytes(msg.data)
+
+    def slam_start(self, execute):
+        status = self.slam if time.time() - self.slam_time < 3 else None
+        if status is None:
+            return {'success': False, 'message': 'SLAM node on the robot is not answering (postal-slam.service?)'}
+        if status.get('active'):
+            return {'success': False, 'message': 'A SLAM run is already active'}
+        sup = self.supervisor
+        if sup is None or sup.state != 1:
+            return {'success': False, 'message': 'Supervisor is not ACTIVE: acknowledge in this panel first'}
+        poses = self.call('list')
+        scan = next((p for p in poses.poses if p.name == 'scan'), None) if poses.success else None
+        if scan is None:
+            return {'success': False, 'message': 'Pose "scan" not found on the robot'}
+        with self.lock:
+            motors = {m.motor_id: m for m in self.motors.motors} if self.motors else {}
+        off = [abs(motors[i + 1].position_ticks - scan.ticks[i]) if i + 1 in motors else 9999 for i in range(7)]
+        if max(off) > 40:
+            return {'success': False, 'message': 'Arm is not at the "scan" pose (largest joint error '
+                    f'{max(off)} ticks > 40): go to scan first; the arm must not move during SLAM'}
+        self.slam_cmd.publish(String(data=json.dumps({'cmd': 'start', 'execute': bool(execute)})))
+        return {'success': True, 'message': 'SLAM start sent' + ('' if execute else ' (proposals only: the robot will not move)')}
 
     def on_arm_status(self, msg):
         try:
@@ -163,7 +421,10 @@ class Station(Node):
         return {'session': self.session, 'browser_lease': self.browser_alive(), 'ages_s': ages,
                 'supervisor': msg_dict(sup) if sup else None, 'motors': msg_dict(motors)['motors'] if motors else [],
                 'joints': dict(zip(joints.name, joints.position)) if joints else {},
-                'cameras': cams, 'arm_status': self.arm_status, 'task': self.tasks.snapshot(), 'go': go, 'planner': self.planner_status}
+                'cameras': cams, 'arm_status': self.arm_status, 'task': self.tasks.snapshot(),
+                'slam': dict(status=self.slam, age_s=(now - self.slam_time) if self.slam_time else None,
+                             photos={k: len(v) for k, v in self.slam_photos.items()}),
+                'detect': self.detect_result, 'go': go, 'planner': self.planner_status}
 
     def api(self, path, body):
         if path == '/api/ping':
@@ -198,14 +459,29 @@ class Station(Node):
                     'poses': [msg_dict(p) for p in r.poses]}
         if path == '/api/plan':
             r = self.call('plan', timeout=100., pose_name=str(body['pose']),
-                          speed_factor=float(body.get('speed_factor', 1.)))
+                          speed_factor=float(body.get('speed_factor', 1.)),
+                          accel_factor=float(body.get('accel_factor', 1.)),
+                          jerk_factor=float(body.get('jerk_factor', 1.)),
+                          arrival_tolerance_rad=float(body.get('arrival_tolerance_rad', 0.)))
             return {'success': r.success, 'executable': r.executable, 'plan_id': r.plan_id,
                     'message': r.message, 'reasons': list(r.reasons), 'duration_s': r.duration_s,
                     'points': len(r.trajectory.points)}
         if path == '/api/execute':
             return self.execute(str(body['plan_id']), bool(body.get('include_gripper')))
+        if path == '/api/slot/plan':
+            return self.slot_plan(body)
+        if path == '/api/detect':
+            return self.detect_mailboxes(int(body.get('camera', 2)))
+        if path == '/api/slam/start':
+            return self.slam_start(bool(body.get('execute', True)))
+        if path == '/api/slam/stop':
+            for _ in range(3):
+                self.slam_cmd.publish(String(data=json.dumps({'cmd': 'stop'})))
+            self.base_cmd = None
+            return {'success': True, 'message': 'SLAM stop sent; the base stops, the arm is not touched'}
         if path == '/api/task/plan':
-            return self.tasks.prepare(str(body['task']), float(body.get('speed_factor', 1.)), int(body.get('ocr_camera', 1)))
+            return self.tasks.prepare(str(body['task']), float(body.get('speed_factor', 1.)), int(body.get('ocr_camera', 1)),
+                                      body.get('params') or {})
         if path == '/api/task/ocr':
             return self.tasks.read_now(int(body.get('camera', 1)))
         if path == '/api/task/start':
@@ -279,6 +555,19 @@ def make_handler(station):
                 return self.send(200, station.page.replace('__TOKEN__', station.token).encode(),
                                  'text/html; charset=utf-8')
             params = dict(p.partition('=')[::2] for p in query.split('&') if p)
+            if path.startswith('/slam_box/') and path.endswith('.jpg'):
+                photo = station.slam_photos.get(path[10:-4])
+                if not self.authorized(params.get('token')) or photo is None:
+                    return self.send(404, {'error': 'no photo'})
+                return self.send(200, photo, 'image/jpeg')
+            if path == '/detect_frame.jpg':
+                if not self.authorized(params.get('token')) or station.detect_frame is None:
+                    return self.send(404, {'error': 'no frame'})
+                return self.send(200, station.detect_frame, 'image/jpeg')
+            if path == '/slam_frame.jpg':
+                if not self.authorized(params.get('token')) or station.slam_frame is None:
+                    return self.send(404, {'error': 'no frame'})
+                return self.send(200, station.slam_frame, 'image/jpeg')
             if path == '/ocr_frame.jpg':
                 frame = getattr(station.tasks, 'last_frame', None)
                 if not self.authorized(params.get('token')) or frame is None:
