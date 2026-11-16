@@ -1,0 +1,43 @@
+{
+ "robot_yml_sha256": "d212a5307b70b4fe35ab4a53cabbc9dfdb0d473632796e817280a101eb27c0d8",
+ "exact_free_samples": 2579,
+ "threshold": 0.01,
+ "pairs": [
+  [
+   "Gripper_Base_v1_1",
+   "Joint_05_v1_1"
+  ],
+  [
+   "Gripper_Base_v1_1",
+   "ST3215_6_v1_1"
+  ],
+  [
+   "Joint_02_1",
+   "Joint_04_v1_1"
+  ],
+  [
+   "Joint_02_1",
+   "Joint_05_v1_1"
+  ],
+  [
+   "Joint_02_1",
+   "ST3215_5_v1_1"
+  ],
+  [
+   "Joint_02_1",
+   "base_link"
+  ],
+  [
+   "Joint_04_v1_1",
+   "Joint_06_v1_1"
+  ],
+  [
+   "Joint_04_v1_1",
+   "ST3215_3_v1_1"
+  ],
+  [
+   "Joint_04_v1_1",
+   "ST3215_7_v1_1"
+  ]
+ ]
+}
