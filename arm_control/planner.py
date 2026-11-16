@@ -48,9 +48,32 @@ def load_config(path):
     if (type(c['servo_speed_ticks_s']) is not int or not 1 <= c['servo_speed_ticks_s'] <= 3400
             or type(c['servo_acceleration']) is not int or not 1 <= c['servo_acceleration'] <= 254):
         raise ValueError('Vitesse/accélération servo invalides')
-    if c['max_velocity_rad_s'] * max(joint_scale(j) for j in c['joints']) > c['servo_speed_ticks_s']:
+    scales = joint_limit_scales(c)
+    if (c['max_velocity_rad_s'] * float(scales['velocity_scale'].max())
+            * max(joint_scale(j) for j in c['joints']) > c['servo_speed_ticks_s']):
         raise ValueError('La limite de vitesse servo est inférieure à celle du plan')
     return c
+
+
+def joint_limit_scales(c):
+    """Per-joint multipliers of the scalar velocity/acceleration/jerk limits (default 1).
+
+    Optional calibration key: "joint_limits": {"velocity_scale": [7], "acceleration_scale": [7],
+    "jerk_scale": [7]} (any subset). A joint that must move gently (J2 carries the whole arm)
+    gets a scale below 1; the Ruckig profile then synchronises all joints on the slowest."""
+    limits = c.get('joint_limits') or {}
+    unknown = set(limits) - {'velocity_scale', 'acceleration_scale', 'jerk_scale'}
+    if unknown:
+        raise ValueError(f'joint_limits: unknown keys {sorted(unknown)}')
+    out = {}
+    for key in ('velocity_scale', 'acceleration_scale', 'jerk_scale'):
+        values = limits.get(key, [1.0] * 7)
+        if (not isinstance(values, list) or len(values) != 7
+                or any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v)
+                       or not 0 < v <= 4 for v in values)):
+            raise ValueError(f'joint_limits.{key}: seven values within (0, 4] required')
+        out[key] = np.array(values, float)
+    return out
 
 
 def require_calibration(c):
@@ -106,7 +129,7 @@ class Arm:
         self.bounds = np.array([[float(j.find('limit').get(k)) for k in ('lower', 'upper')]
                                 for j in active])
         velocities = [float(j.find('limit').get('velocity')) for j in active]
-        if config['max_velocity_rad_s'] > min(velocities):
+        if config['max_velocity_rad_s'] * float(joint_limit_scales(config)['velocity_scale'].max()) > min(velocities):
             raise ValueError('Vitesse supérieure aux limites URDF')
         if config.get('hardware_verified'):
             require_calibration(config)
@@ -179,9 +202,10 @@ class Arm:
         inp.current_position, inp.target_position = start.tolist(), end.tolist()
         inp.current_velocity = inp.current_acceleration = [0.0]*7
         inp.target_velocity = inp.target_acceleration = [0.0]*7
-        inp.max_velocity = [self.c['max_velocity_rad_s']]*7
-        inp.max_acceleration = [self.c['max_acceleration_rad_s2']]*7
-        inp.max_jerk = [self.c['max_jerk_rad_s3']]*7
+        scales = joint_limit_scales(self.c)  # per-joint limits (default: the same for all)
+        inp.max_velocity = (self.c['max_velocity_rad_s'] * scales['velocity_scale']).tolist()
+        inp.max_acceleration = (self.c['max_acceleration_rad_s2'] * scales['acceleration_scale']).tolist()
+        inp.max_jerk = (self.c['max_jerk_rad_s3'] * scales['jerk_scale']).tolist()
         inp.synchronization = Synchronization.Phase
         traj = Trajectory(7)
         status = Ruckig(7).calculate(inp, traj)

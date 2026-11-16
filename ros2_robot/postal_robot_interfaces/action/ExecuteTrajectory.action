@@ -11,6 +11,9 @@ float64[] compensation_limit_rad
 # Looser acceptance (rad) for poses next to an obstacle where the servo cannot reach
 # the exact target; 0 = robot defaults. Success then also needs the arm to be settled.
 # Capped by the robot (max 0.08).
+# Ratio of the plan's acceleration limit to the calibrated one; the servo acceleration register
+# follows it. 0 = legacy behaviour (speed ratio squared).
+float64 acceleration_ratio
 float64 arrival_tolerance_rad
 float64 start_tolerance_rad      # for a leg that starts from such a pose
 ---

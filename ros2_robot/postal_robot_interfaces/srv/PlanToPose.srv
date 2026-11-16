@@ -1,8 +1,14 @@
 string pose_name
+int32[] start_ticks          # 7 ticks: plan from this configuration instead of the measured one (chained legs of a task)
+int32[] via_ticks            # 7 ticks per waypoint, flattened: pass through these configurations, in order, before the goal (e.g. pivot first)
+int32[] goal_ticks           # 7 ticks: plan to this arm configuration instead of a stored pose (pose_name is then just a label)
 string start_pose_name         # empty = start from the measured arm pose; else plan from that stored pose (task legs)
 float64 valid_for_s           # 0 = default plan lifetime
 float64 arrival_tolerance_rad  # 0 = default; see ExecuteTrajectory
 float64 start_tolerance_rad
+float64 accel_factor           # 0 = 1.0 (calibrated). Torque peaks come from acceleration, not from speed
+float64 jerk_factor            # 0 = 1.0 (calibrated)
+bool skip_compensation          # transit pose: accept the arrival once settled (no static-error correction steps)
 float64 speed_factor        # scales calibrated velocity/acceleration/jerk; 0 = 1.0
 ---
 bool success

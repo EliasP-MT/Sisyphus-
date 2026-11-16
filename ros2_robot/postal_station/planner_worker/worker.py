@@ -45,6 +45,69 @@ class Planner:
                   if j.get('name') in [f'rev_motor_{i:02d}' for i in range(1, 8)]]
         self.urdf_velocity = min(limits)
 
+    def camera_pose(self, ticks):
+        """T_base_camera (optical frame) for the arm at these ticks, from the measured camera mount."""
+        import slot_ik
+        if getattr(self, 'camera_mount', None) is None:
+            raise ValueError('No camera mount configured (arm_control/camera-mount.local.json)')
+        self._check_ticks(ticks[:7], 'Current arm')
+        with self.lock:
+            q = ticks_to_joints(self.config, ticks[:7])
+            return {'T_base_camera': slot_ik.camera_pose(self.arm, q, self.camera_mount).tolist()}
+
+    def plan_via(self, start_ticks, via, goal_ticks, speed_factor=1., accel_factor=1., jerk_factor=1.):
+        """One trajectory start -> via[0] -> ... -> goal, each leg planned (collision-free) and joined; the
+        arm is at rest at every junction (e.g. the wrist pivot is finished before the arm moves on)."""
+        waypoints = [list(start_ticks)] + [list(v) for v in via] + [list(goal_ticks)]
+        legs = [self.plan(a, b, speed_factor, accel_factor, jerk_factor) for a, b in zip(waypoints, waypoints[1:])]
+        times, positions, offset = [], [], 0.
+        for k, leg in enumerate(legs):
+            skip = 1 if k else 0  # the first sample of a leg is the last of the previous one
+            times += [offset + t for t in leg['times'][skip:]]
+            positions += leg['positions'][skip:]
+            offset += leg['times'][-1]
+        last = legs[-1]
+        return dict(last, times=times, positions=positions, duration_s=float(offset),
+                    reasons=[r for leg in legs for r in leg['reasons']],
+                    executable=all(leg['executable'] for leg in legs), waypoints=sum(leg['waypoints'] for leg in legs),
+                    planning_s=sum(leg['planning_s'] for leg in legs),
+                    collision_checks=sum(leg['collision_checks'] for leg in legs), legs=len(legs))
+
+    def pivot_ticks(self, ticks, delta_rad):
+        """The same arm configuration with J7 turned by delta_rad (the wrist pivot, in place)."""
+        self._check_ticks(ticks[:7], 'Pivot start')
+        with self.lock:
+            q = ticks_to_joints(self.config, ticks[:7])
+            q[6] += float(delta_rad)
+            goal = [int(t) for t in joints_to_ticks(self.config, self.arm.check(q))]
+            self._check_ticks(goal, 'Pivot goal')
+            return {'goal_ticks': goal}
+
+    def ik_xyz(self, start_ticks, target_xyz, tcp_offset_m, approach_dir=None, pivot_rad=0., pivot_reference_ticks=None):
+        """Goal joint ticks putting the gripper fingertips on a base_link point, J7 imposed at its
+        reference angle plus the wrist pivot (the reference is the J7 of pivot_reference_ticks, e.g. the
+        `scan` pose, or the current angle). The path itself is planned by plan() (collision-free)."""
+        import slot_ik
+        self._check_ticks(start_ticks[:7], 'Current arm')
+        offset = [float(v) for v in tcp_offset_m]
+        if len(offset) != 3 or not all(abs(v) <= 0.3 for v in offset):
+            raise ValueError('tcp_offset_m: three values within +/-0.3 m')
+        with self.lock:
+            q0 = ticks_to_joints(self.config, start_ticks[:7])
+            if pivot_reference_ticks:
+                self._check_ticks(pivot_reference_ticks[:7], 'Pivot reference')
+                reference = float(ticks_to_joints(self.config, pivot_reference_ticks[:7])[6])
+            else:
+                reference = float(q0[6])
+            q, info = slot_ik.solve_tcp_ik(self.arm, q0, target_xyz, offset, approach_dir,
+                                           pinned={6: reference + float(pivot_rad)})
+            goal_ticks = [int(t) for t in joints_to_ticks(self.config, q)]
+            self._check_ticks(goal_ticks, 'Goal')
+            T = self.arm.fk(q)
+            tip = T[:3, 3] + T[:3, :3] @ offset
+            return dict(goal_ticks=goal_ticks, goal_q_rad=[float(v) for v in q], tip_xyz_m=[float(v) for v in tip],
+                        gripper_axis=[float(v) for v in T[:3, :3] @ slot_ik.FORWARD], **info)
+
     def readiness(self):
         """Scene readiness (hashes every geometry file): cached 20 s for /status.
         Plans always re-run require_hardware_ready themselves."""
@@ -77,11 +140,18 @@ class Planner:
                 raise ValueError(f"{label}: {j['name']} at {t} ticks is outside the operating margin "
                                  f"{j['min_ticks']}..{j['max_ticks']}; not clipped. Reposition first.")
 
-    def plan(self, start_ticks, goal_ticks, speed_factor=1.):
-        f = float(speed_factor)
+    def plan(self, start_ticks, goal_ticks, speed_factor=1., accel_factor=1., jerk_factor=1.):
+        """Speed scales the velocity limit only. Acceleration and jerk have their own factors
+        (default 1 = the calibrated values): the servo torque peaks come from acceleration, so a
+        faster plan does not have to accelerate harder."""
+        f, fa, fj = float(speed_factor), float(accel_factor or 1.), float(jerk_factor or 1.)
         if not (0.1 <= f <= self.max_speed_factor):
             raise ValueError(f'speed_factor must be within 0.1..{self.max_speed_factor}')
-        if self.config['max_velocity_rad_s'] * f > self.urdf_velocity:
+        if not (0.1 <= fa <= 4.) or not (0.1 <= fj <= 4.):
+            raise ValueError('accel_factor and jerk_factor must be within 0.1..4')
+        from planner import joint_limit_scales
+        vscale = float(joint_limit_scales(self.config)['velocity_scale'].max())
+        if self.config['max_velocity_rad_s'] * f * vscale > self.urdf_velocity:
             raise ValueError('Requested speed exceeds the URDF joint velocity limit')
         self._check_ticks(start_ticks, 'Current arm')
         self._check_ticks(goal_ticks, 'Target pose')
@@ -94,8 +164,8 @@ class Planner:
             saved = {k: c[k] for k in keys}
             rows = []
             try:
-                for k in keys:  # Ruckig limits only; restored before readiness checks
-                    c[k] = saved[k] * f
+                for k, factor in zip(keys, (f, fa, fj)):  # Ruckig limits only; restored before readiness checks
+                    c[k] = saved[k] * factor
                 for a, b in zip(path, path[1:]):
                     segment = arm.segment(a, b)
                     offset = rows[-1]['t_s'] if rows else 0.
@@ -124,7 +194,7 @@ class Planner:
                         reasons=reasons, executable=not reasons,
                         compensation_limit_rad=compensation, compensation_note=note,
                         planning_s=time.monotonic() - begin, collision_checks=world.checks,
-                        speed_factor=f)
+                        speed_factor=f, accel_factor=fa, jerk_factor=fj)
 
     def _compensation_box(self, final, limit=.06):
         """Validate the per-joint static-error compensation bounds around the final pose.
@@ -207,7 +277,22 @@ def serve(planner, port):
                 body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))) or b'{}')
                 if self.path == '/plan':
                     return self.reply(200, planner.plan(body['start_ticks'], body['goal_ticks'],
-                                                        body.get('speed_factor', 1.)))
+                                                        body.get('speed_factor', 1.),
+                                                        body.get('accel_factor', 1.),
+                                                        body.get('jerk_factor', 1.)))
+                if self.path == '/plan_via':
+                    return self.reply(200, planner.plan_via(body['start_ticks'], body['via_ticks'], body['goal_ticks'],
+                                                            body.get('speed_factor', 1.), body.get('accel_factor', 1.),
+                                                            body.get('jerk_factor', 1.)))
+                if self.path == '/pivot_ticks':
+                    return self.reply(200, planner.pivot_ticks(body['ticks'], body['delta_rad']))
+                if self.path == '/camera_pose':
+                    return self.reply(200, planner.camera_pose(body['ticks']))
+                if self.path == '/ik_xyz':
+                    return self.reply(200, planner.ik_xyz(body['start_ticks'], body['target_xyz_m'],
+                                                          body['tcp_offset_m'], body.get('approach_dir'),
+                                                          body.get('pivot_rad', 0.),
+                                                          body.get('pivot_reference_ticks')))
                 if self.path == '/check':
                     return self.reply(200, planner.check(body['ticks']))
                 self.reply(404, {'error': 'not found'})
@@ -224,11 +309,13 @@ def main():
     parser.add_argument('--calibration', required=True)
     parser.add_argument('--scene', required=True)
     parser.add_argument('--port', type=int, default=8893)
+    parser.add_argument('--camera-mount', help='measured {parent_link, T_parent_camera} JSON (camera 2)')
     parser.add_argument('--max-speed-factor', type=float, default=2.,
                         help='must not exceed the robot max_speed_factor parameter')
     args = parser.parse_args()
     planner = Planner(args.calibration, args.scene)
     planner.max_speed_factor = args.max_speed_factor
+    planner.camera_mount = json.loads(Path(args.camera_mount).read_text()) if args.camera_mount else None
     serve(planner, args.port)
 
 

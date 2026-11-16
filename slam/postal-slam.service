@@ -1,0 +1,18 @@
+[Unit]
+Description=Postal robot mailbox SLAM (idle until /slam/command from the Station panel)
+After=postal-robot.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=%h/humanoid-hackathon/slam
+EnvironmentFile=%h/postal_config/ros.env
+Environment=FASTRTPS_DEFAULT_PROFILES_FILE=%h/postal_config/fastdds_robot.xml
+ExecStart=/bin/bash -c 'source /opt/ros/humble/setup.bash && source %h/postal_ws/install/setup.bash && exec python3 run_robot_slam.py --serve --robot-yaml %h/postal_ws/src/postal_robot/config/robot.yaml --base-link base_link --camera-mount %h/postal_config/camera-mount.json --arm-base %h/postal_config/arm-base.json'
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGINT
+TimeoutStopSec=10
+
+[Install]
+WantedBy=default.target

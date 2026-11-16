@@ -46,7 +46,8 @@ class Calibration:
                     or not 0 <= j['zero_ticks'] <= 4095
                     or not 0 <= j['min_ticks'] < j['max_ticks'] <= 4095):
                 raise CalibrationError(f"{j['name']}: measured zero, sign and limits required")
-            if data.get('max_velocity_rad_s', 0) * scale > data['servo_speed_ticks_s']:
+            vscale = max((data.get('joint_limits') or {}).get('velocity_scale', [1.0]))
+            if data.get('max_velocity_rad_s', 0) * vscale * scale > data['servo_speed_ticks_s']:
                 raise CalibrationError(f"{j['name']}: planned velocity exceeds servo speed")
         self.joints = joints
 
