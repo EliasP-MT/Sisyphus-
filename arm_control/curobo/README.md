@@ -37,4 +37,7 @@ below illustrate model regeneration after restoring the SDK and local inputs:
 ~/hack/curobo-src/.venv/bin/python arm_control/curobo/calibrate_self.py     # after every model rebuild
 ```
 `ros2_robot/deploy/station.sh` uses this venv when it exists. `POSTAL_PLANNER_BACKEND=cpu` forces the old pipeline.
-`elrobot.yml` contains absolute paths for this PC; rebuild it on another machine.
+`elrobot.yml` contains absolute paths. On another machine, run `python3 restore/data.py`
+from the repository root to relocate the saved model and scenes while preserving
+the sphere fit and calibrated collision exemptions. Rebuild and recalibrate only
+when changing the geometry, as explained in the restoration guide.

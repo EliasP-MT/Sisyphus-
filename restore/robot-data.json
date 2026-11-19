@@ -1,0 +1,277 @@
+{
+  "version": 1,
+  "source_root": "/home/evan/hack/humanoid-hackathon",
+  "files": [
+    {
+      "path": "arm_control/assets/full_robot_box_complete_collision/assembly.json",
+      "size": 688,
+      "sha256": "d3ea06b01e105360ddb86b994f1bf7785070814928fa4782cc8e554d2f8d07b4"
+    },
+    {
+      "path": "arm_control/assets/full_robot_box_complete_collision/assembly.obj",
+      "size": 13116154,
+      "sha256": "7858dc8cd789c4dc6d059e0ad2d07556ab0cd9fd2ef3d6c9af5deb1888ac3030"
+    },
+    {
+      "path": "arm_control/assets/full_robot_box_complete_collision/manifest.json",
+      "size": 5212,
+      "sha256": "a5c08523a800f212798a043956093d1ef9efac7a57ec0ebea052077137d42677"
+    },
+    {
+      "path": "arm_control/assets/full_robot_box_complete_collision/solid_000.obj",
+      "size": 748,
+      "sha256": "f52b67541d4f84c3f1331c4baf146d07cebddfc839d59e6d4e076f6a3ce8a197"
+    },
+    {
+      "path": "arm_control/assets/full_robot_box_complete_collision/solid_001.obj",
+      "size": 317862,
+      "sha256": "1179fdc08c585936c35517fc4d06853fb5a25b557bff1989b2e134a0092e3038"
+    },
+    {
+      "path": "arm_control/assets/full_robot_box_complete_collision/solid_002.obj",
+      "size": 760,
+      "sha256": "11b1b337dd7f5649c1f614964a7714bfdbb7ab0b1c2898316e8b824e0e521929"
+    },
+    {
+      "path": "arm_control/assets/full_robot_box_complete_collision/solid_003.obj",
+      "size": 78747,
+      "sha256": "404418576847e7c02cee3f7e169a1df0c1a2ec76cabce078a7890aecedb42bd0"
+    },
+    {
+      "path": "arm_control/assets/full_robot_box_complete_collision/solid_004.obj",
+      "size": 279483,
+      "sha256": "61bc7a794e05e0ef06341124d43bbf8a553a7b4a413683eab10c28d1591c6abe"
+    },
+    {
+      "path": "arm_control/assets/full_robot_box_complete_collision/solid_005.obj",
+      "size": 712,
+      "sha256": "691e94b42db3d3c284f58a8c6f8832fc598f3e234c0af5d6c761d5bbbd5e66d2"
+    },
+    {
+      "path": "arm_control/assets/full_robot_box_complete_collision/solid_006.obj",
+      "size": 50132,
+      "sha256": "3a66a393af3b74f97af5ad90fbb1c98ad075a27c07df2bdafeb19edb5ca5f683"
+    },
+    {
+      "path": "arm_control/assets/full_robot_box_complete_collision/solid_007.obj",
+      "size": 52560,
+      "sha256": "4ebe2023a2676b0fb7941331c13dcb3e8e58c599f148b2bd571219b4f8823b21"
+    },
+    {
+      "path": "arm_control/assets/full_robot_box_complete_collision/solid_008.obj",
+      "size": 165288,
+      "sha256": "db66b6695b20f25842071e34f7475b5505f737763c32c70fa2d289f18e0ce30b"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/fixed_0/assembly.json",
+      "size": 605,
+      "sha256": "89512f421aa789de33bdef6fa2754eafbb26f7db85434471d8b17e5cf3850d77"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/fixed_0/assembly.json.bak-usb",
+      "size": 625,
+      "sha256": "b2c7a2094f1e982ace19e6b0f754a3a709599b5ab8b159e3a1c9bcdf0e55274b"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/fixed_0/assembly.obj",
+      "size": 1064911,
+      "sha256": "38d06c08c8ccca36750ac2b4a6f1eefad012546bd62608d7d97858ab63b0fbbb"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/fixed_1/assembly.json",
+      "size": 604,
+      "sha256": "5e41b1ea0c7f5e994e67fbd78907d2da5e8210cea84efc913e6973e5fb2be110"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/fixed_1/assembly.json.bak-usb",
+      "size": 624,
+      "sha256": "f50c89d472e7a78aefa89b4f42df1036d2ebf02aead6e88869992d67e4fbf698"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/fixed_1/assembly.obj",
+      "size": 165277,
+      "sha256": "82c6a97d0aae8786abc4a4b4b7da99b783ffe9a3aff7461b68dfba7c13d0b6a5"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/fixed_2/assembly.json",
+      "size": 675,
+      "sha256": "9d5970b1c684977b41124a7ad9e2874d121ff1efb533bd51a5f8f362497db283"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/fixed_2/assembly.json.bak-usb",
+      "size": 695,
+      "sha256": "1e2851a03bc8faf40856c59f9d1bb028bee37845dc6a5f530e98b64f76ca31e3"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/fixed_2/assembly.obj",
+      "size": 7480445,
+      "sha256": "4beb28a28149a867949f6b7e2334828307665745e637d476493313471097e8ce"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/full_robot_box_complete.step",
+      "size": 170675966,
+      "sha256": "7248490e2f068d324c7f5b1c99cc8f8e00b4879e71c399fcebae9aa60097bc0d"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/rover-fast-scene.local.json",
+      "size": 60154,
+      "sha256": "48548368801698b9fdc71123f20ba9ba01f04a784b83660209329ac197076119"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/rover-hybrid-scene.local.json",
+      "size": 53347,
+      "sha256": "032776b84b86a120f711604f5d9f1c5a4bffa311a0d010d55d64615668f5d1e6"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/rover-sat5-scene.local.json",
+      "size": 404522,
+      "sha256": "6e1e14074b44bd0445946f5e5a96598a82ed28f73cb8633fcd0cd74e0d775129"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/rover-scene.local.json",
+      "size": 1933,
+      "sha256": "83ba07ce7564b8df08b5ab8182a3c499001b6d3294dd5263533947a085024ad2"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/rover-simple-scene.local.json",
+      "size": 44293,
+      "sha256": "3e7c98db5527db3d1274ac9ce38a8936d313cbdd54a579aea57bb7778871abc0"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/rover-static-15mm.local.json",
+      "size": 44254,
+      "sha256": "1bb61f395c5a9bc287a44a77a87f10e7443fb8597c03545bf5d9e1dc380e410c"
+    },
+    {
+      "path": "arm_control/assets/rover-fixed.local/rover-static-5mm.local.json",
+      "size": 226332,
+      "sha256": "9d7be111a5933942930b245d5c4299acd17e4e1f2ba6932e6e67012ba8eb42b0"
+    },
+    {
+      "path": "arm_control/calibration-candidate-20261115-092335-655936.local.json",
+      "size": 1973,
+      "sha256": "725e5ae1e0cc8491454b59c36c7acaaa7d712c33bdee62201cc707110ae83c01"
+    },
+    {
+      "path": "arm_control/calibration-candidate-20261115-092632-995157.local.json",
+      "size": 1972,
+      "sha256": "759b93e0a10212ddd71424e5d361492ed9023bc5f94f6e7fc68083b24d9a9c3d"
+    },
+    {
+      "path": "arm_control/calibration-candidate-20261115-093233-152944.local.json",
+      "size": 1972,
+      "sha256": "a4c2d60c2f99bdd6fc3be3df214e9f8e74953dd3c18f45f76d6f7103d57acca3"
+    },
+    {
+      "path": "arm_control/calibration-candidate-20261115-093322-865055.local.json",
+      "size": 1972,
+      "sha256": "6270676c61512bd80cca29f02505176c8cf2cf88d1538b0191be8846316cc8bd"
+    },
+    {
+      "path": "arm_control/calibration-candidate-20261115-093414-714228.local.json",
+      "size": 1972,
+      "sha256": "6270676c61512bd80cca29f02505176c8cf2cf88d1538b0191be8846316cc8bd"
+    },
+    {
+      "path": "arm_control/calibration-candidate-20261115-105050-197423.local.json",
+      "size": 2045,
+      "sha256": "e06290a862c0eab3ef1bb633b1f825e9dd1aa8f0e4a15aff5bae25b06a85129d"
+    },
+    {
+      "path": "arm_control/calibration-candidate-20261115-105050-197423.local.json.bak-20261115-214039",
+      "size": 2045,
+      "sha256": "465a9b84659c55bf0c83a2dc70fb223c90729b8c6b5c9cd7c69810dcba7306da"
+    },
+    {
+      "path": "arm_control/camera-mount.local.json",
+      "size": 826,
+      "sha256": "7e8026441d7b6e8533e4317e27278a880b4f27bdb0fd25039de31601f1332115"
+    },
+    {
+      "path": "arm_control/curobo/elrobot.yml",
+      "size": 16133,
+      "sha256": "d212a5307b70b4fe35ab4a53cabbc9dfdb0d473632796e817280a101eb27c0d8"
+    },
+    {
+      "path": "arm_control/curobo/elrobot_arm.generated.urdf",
+      "size": 24116,
+      "sha256": "73757c880841cc452dcc819be0644a700e29f29c66d31d718cb4dead6ffb0718"
+    },
+    {
+      "path": "arm_control/curobo/self_exempt.json",
+      "size": 579,
+      "sha256": "6fc952c4a0e488d07dc3266c93821413a1d96ec9a96f2d9fd99e27bfd353c7c4"
+    },
+    {
+      "path": "arm_control/elrobot.local.json",
+      "size": 1206,
+      "sha256": "04068e6e28a54050513be327b981ee0571d681547276cac75a1b4b2a395cc284"
+    },
+    {
+      "path": "arm_control/j3-corrected-preview.local.json",
+      "size": 680353,
+      "sha256": "8c0ee5181dbd4fb5993ca95b09bc4604a99b5cdd1e1f8354ccd7906bf0212186"
+    },
+    {
+      "path": "arm_control/joint-identification.local.json",
+      "size": 2855,
+      "sha256": "1585239fd68e52991e20b4105913ff508fa1a63caa9a3e0a6d599ec7f3b58f47"
+    },
+    {
+      "path": "arm_control/poses-backup-20261115-092551-519701.local.json",
+      "size": 7057,
+      "sha256": "14b7785f8347e8cee8c0b9efb415d42d7e193208280deb9d529827868b518d63"
+    },
+    {
+      "path": "arm_control/poses-backup-20261115-092554-308636.local.json",
+      "size": 7054,
+      "sha256": "cd1d84e4f381bf625bbe713d9ad8a1e60f8cdb0f46d0beb541dd705792129b84"
+    },
+    {
+      "path": "arm_control/poses-backup-20261115-092805-144381.local.json",
+      "size": 7054,
+      "sha256": "b288851b887829268ffc6636f98a9193082bf82c94054dae65776b29b83c9758"
+    },
+    {
+      "path": "arm_control/poses-backup-20261115-093329-997366.local.json",
+      "size": 7054,
+      "sha256": "b74e03712ec6c78e4173a1e1a3b53b2c79ba503e11cb67b2f8fe535074c1a752"
+    },
+    {
+      "path": "arm_control/poses-backup-20261115-093433-827328.local.json",
+      "size": 7056,
+      "sha256": "d3994867062f12bbd51098fa0b5bcefccb7d9dec566c39e612d965ea4131e83b"
+    },
+    {
+      "path": "arm_control/poses-backup-20261115-093512-573357.local.json",
+      "size": 7054,
+      "sha256": "df19c5b152f7d4fcdcbd33e7bbd5c997b472edba5df00407d39e26688baa3dac"
+    },
+    {
+      "path": "arm_control/poses.local.json",
+      "size": 7054,
+      "sha256": "d9c2325ddd4b59cf67fcd5afb3bbde05bb79e933a1851c42fde35a072704e4ed"
+    },
+    {
+      "path": "arm_control/test-plan.local.json",
+      "size": 680318,
+      "sha256": "04701b2ec2b2f23dfa5cd996dfb233c341630521ee78102f9ae795d48c70a196"
+    },
+    {
+      "path": "arm_control/vertical-horizontal-preview.local.json",
+      "size": 680318,
+      "sha256": "04701b2ec2b2f23dfa5cd996dfb233c341630521ee78102f9ae795d48c70a196"
+    },
+    {
+      "path": "config/floor-camera.json",
+      "size": 359,
+      "sha256": "a60b0743f91a46e863767f4e883f28e49b580b16c1199ff99ddb2190ee211b86"
+    },
+    {
+      "path": "models/yolov8n.bin",
+      "size": 3806800,
+      "sha256": "50c80a6bd2f8e974142fc3e6dae6f86f046eab192fd6a470497b00629bccf705"
+    }
+  ],
+  "archive_sha256": "23573c1eb59ba02ed4a773311799dca072f78a6c3ec47ae6b62169184ce4e052"
+}

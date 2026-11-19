@@ -155,6 +155,11 @@ PC (Ubuntu 24.04)                                RDK X5 (Ubuntu 22.04, aarch64)
 
 ## 4. Données locales (hors Git)
 
+Mise à jour du 19 novembre 2026 : les calibrations, poses et scènes du PC sont
+maintenant sauvegardées dans `restore/robot-data.tar.gz`. Leurs copies de travail
+restent ignorées par Git. Voir [la restauration portable](RESTORE_PC.md).
+Les secrets et l'ancienne base Station restent exclus du dépôt public.
+
 | Donnée | PC | RDK |
 | --- | --- | --- |
 | Calibration vérifiée | `arm_control/calibration-candidate-20261115-105050-197423.local.json` | `~/postal_config/calibration.local.json` |
