@@ -1,88 +1,133 @@
-# Recreate the PC cuRobo setup
+# Recréer le poste de contrôle sur un autre PC
 
-This recipe restores the disposable `~/hack/curobo-src` directory from this
-repository and upstream packages. It does **not** reconstruct robot-specific
-calibrations, scenes, captured images or station state from Git. Keep the existing
-`humanoid-hackathon` checkout and its ignored local files when cleaning up cuRobo.
+Le dépôt contient maintenant les calibrations, poses, montage caméra, scènes,
+maillages et CAO enregistrés sur le PC le 19 novembre 2026. L'archive
+`restore/robot-data.tar.gz` et son manifeste SHA-256 sauvegardent 54 fichiers.
+`restore/data.py` vérifie chaque fichier, adapte les chemins au nouveau clone
+et refuse d'écraser une modification locale inconnue.
 
-## Recorded environment (2026-11-19)
+Ces données concernent **le même robot physique**. Les recopier sur un autre
+ordinateur ne recalibre pas un autre robot. Cette procédure n'envoie aucune
+commande au robot et ne lance pas automatiquement la station.
 
-- Ubuntu 24.04.3, Linux x86_64, Python 3.12.3.
-- NVIDIA GeForce RTX 3050 Ti Laptop GPU; driver 595.99.02.
-- PyTorch 2.14.1+cu130. A compatible NVIDIA driver and GPU are required.
-- cuRobo commit `71ce1726925adfdcc7d0d39dabec5f2d6bb71acd` from
-  <https://github.com/NVlabs/curobo> (not the moving `main` branch).
-- All installed Python package versions are recorded in
-  `arm_control/curobo/requirements-linux-py312.lock`.
+## Prérequis
 
-Internet access and approximately 12 GB of free space are recommended during install
-(including temporary downloads and the PyBullet build).
-This snapshot depends on upstream Git and package indexes remaining available;
-it is not an offline backup. Other Python versions/platforms are not covered.
+Configuration enregistrée : Ubuntu 24.04.3 x86_64, Python 3.12.3, Docker
+29.8.1. Pour cuRobo : NVIDIA RTX 3050 Ti Laptop, pilote 595.99.02,
+PyTorch 2.14.1+cu130. Sur un autre PC, un GPU NVIDIA et un pilote compatible
+CUDA sont nécessaires pour reproduire le moteur GPU ; le mode CPU reste disponible.
+Windows, macOS et ARM ne sont pas couverts par les versions Python figées.
 
-## Restore after cloning
+Prévoir une connexion Internet et environ 20 Go libres pour les environnements,
+les compilations temporaires et l'image ROS. Installer Docker Engine et permettre
+à l'utilisateur d'exécuter `docker info`. Avec Ubuntu 24.04 :
 
-Install Git, a C++ compiler and Python 3.12 with development headers and venv
-support first (Ubuntu 24.04 packages: `git build-essential python3.12-dev
-python3.12-venv`). PyBullet is built from source for this Python version.
-Install a compatible NVIDIA driver and confirm
-`nvidia-smi` works. Then:
+```bash
+sudo apt-get update
+sudo apt-get install git curl build-essential python3.12-dev python3.12-venv \
+  libgl1 libglib2.0-0 x11-xserver-utils rsync openssh-client
+```
+
+RViz utilise l'affichage X11/XWayland. Pour le GPU, installer le pilote NVIDIA
+adapté au matériel et vérifier `nvidia-smi`. Les clés SSH et mots de passe ne
+sont pas inclus dans ce dépôt public.
+
+## Restaurer depuis GitHub
 
 ```bash
 mkdir -p ~/hack
-git clone git@github.com:EliasP-MT/Sisyphus-.git ~/hack/humanoid-hackathon
+git clone https://github.com/EliasP-MT/Sisyphus-.git ~/hack/humanoid-hackathon
 cd ~/hack/humanoid-hackathon
+bash scripts/restore_pc.sh
+# Option GPU, nécessaire pour retrouver l'accélération cuRobo :
 bash arm_control/curobo/restore.sh
 ```
 
-The script downloads the recorded cuRobo commit, installs the pinned packages,
-checks dependencies and performs imports plus a CUDA tensor operation. It does
-not start the robot. It refuses to overwrite an existing destination. To install
-elsewhere, use `CUROBO_ROOT=/absolute/new/path bash arm_control/curobo/restore.sh`
-and set `PLANNER_PY=/absolute/new/path/.venv/bin/python` when starting the station.
-On failure, retain the output for diagnosis; partial files remain at the chosen
-destination and a retry requires a different empty destination or removal of
-that partial installation.
+Le premier script restaure les données, le SDK, les environnements CPU et OCR,
+les poids OCR exacts et l'image Docker. Il refuse de remplacer un environnement
+Python existant : utiliser un clone neuf. En cas d'échec réseau, les éléments
+déjà créés restent sur disque ; consulter la sortie avant toute nouvelle tentative.
+Les étapes peuvent aussi être exécutées individuellement en lisant le script.
 
-`ros2_robot/deploy/station.sh` automatically selects
-`~/hack/curobo-src/.venv/bin/python` when it exists. The CPU planner environment
-can be recreated with `bash arm_control/setup.sh`; this fetches NormaCore commit
-`6b494f77fac366a878ae71222458b196f8400dee` for the arm meshes.
+Pour restaurer uniquement les données, sans dépendances ni réseau :
+`python3 restore/data.py`. Le script est idempotent. Il vérifie toute l'archive
+et tous les conflits avant d'écrire. Il ne remplace que des fichiers absents,
+identiques ou correspondant exactement à la version originale sauvegardée.
 
-## Models and local data
+### Versions enregistrées
 
-Reinstalling cuRobo on this PC at the same paths does not require regenerating
-the robot model. The existing files in `arm_control/curobo/` remain in Git.
-On another machine or after moving the checkout, the model contains absolute
-paths and must be rebuilt. From the **humanoid repository root**, after restoring
-the SDK with `bash arm_control/setup.sh`:
+- SDK NormaCore : `6b494f77fac366a878ae71222458b196f8400dee`.
+- Python CPU : `restore/requirements-arm.lock`.
+- Python OCR : `restore/requirements-ocr.lock`.
+- Poids PaddleOCR : dépôts PaddlePaddle/PP-OCRv5_mobile_det et
+  PaddlePaddle/PP-OCRv5_mobile_rec, révisions et SHA-256 dans
+  `restore/ocr-models.json`. Le téléchargement est vérifié et les fichiers vont
+  dans `base_ocr/models.local/`. Le moteur OCR utilise ces fichiers en priorité.
+  Les modèles et leurs notices restent disponibles auprès de PaddlePaddle.
+- cuRobo : `71ce1726925adfdcc7d0d39dabec5f2d6bb71acd` de NVlabs/curobo ;
+  dépendances dans `arm_control/curobo/requirements-linux-py312.lock`.
+- Image ROS 2 Humble :
+  `ghcr.io/epflxplore/base@sha256:5b79ee573136a226081edd39c7f4f6710faf5d8bf1dde7c5d96eb385223ecc65`.
+
+Le dépôt contient les données spécifiques au robot, mais ne constitue pas un
+miroir hors ligne de Python, Docker, NVIDIA, du SDK ou des modèles OCR. Ces
+composants sont téléchargés aux versions indiquées ; leur disponibilité dépend
+de leurs hébergeurs.
+
+## Portabilité des chemins et du modèle de collision
+
+Le script remplace l'ancien chemin du clone dans les scènes JSON, le modèle
+cuRobo YAML et son URDF. Les sphères et les paires d'exemption restent identiques.
+Il vérifie d'abord le hash d'origine du modèle, puis adapte celui du fichier
+`self_exempt.json` au YAML dont seuls les chemins ont changé.
+
+**Il n'est donc pas nécessaire de régénérer ni de recalibrer le modèle simplement
+parce que le nom d'utilisateur ou le dossier change.** Si la géométrie du robot
+change, utiliser `arm_control/curobo/build_model.py` puis
+`arm_control/curobo/calibrate_self.py` avec les nouvelles entrées et vérifier
+physiquement les calibrations.
+
+Le dossier cuRobo est créé par défaut dans `~/hack/curobo-src`. Pour un autre
+emplacement : `CUROBO_ROOT=/chemin/neuf bash arm_control/curobo/restore.sh`,
+puis définir `PLANNER_PY=/chemin/neuf/.venv/bin/python` au lancement.
+
+## Démarrage manuel
+
+Après connexion au réseau du robot, remplacer l'adresse par son IP actuelle :
 
 ```bash
-~/hack/curobo-src/.venv/bin/python arm_control/curobo/build_model.py
-~/hack/curobo-src/.venv/bin/python arm_control/curobo/calibrate_self.py \
-  --calibration /absolute/path/to/calibration.local.json \
-  --scene /absolute/path/to/rover-scene.local.json
+ROBOT_WIFI_IP=172.20.10.3 bash ros2_robot/deploy/station.sh
+# Ou sans fenêtre RViz :
+ROBOT_WIFI_IP=172.20.10.3 bash ros2_robot/deploy/station.sh rviz:=false
 ```
 
-Calibration also requires `arm_control/poses.local.json` and scene mesh assets.
-The calibration, poses, `arm_control/assets/rover-fixed.local/`, other ignored
-assets and `station/station_data/` are machine/robot data, not dependencies.
-Keep them locally or transfer them separately using a private backup. A fresh
-clone alone is **not** sufficient to reproduce the complete robot installation.
-See `ros2_robot/README.md` for ROS 2 and station setup.
+L'interface est accessible sur http://127.0.0.1:8895/. Le domaine ROS est 43
+par défaut ; le robot et le PC doivent utiliser le même domaine. Le script génère
+le profil réseau à partir de l'interface qui rejoint le robot. Une adresse IP,
+une interface Wi-Fi ou un accès SSH ne se restaurent pas à partir de l'ancien PC.
 
-## Cleanup scope
+Cette sauvegarde porte sur le poste PC et ses données. L'état actuel du RDK n'a
+pas été interrogé ni modifié : s'il contient des poses ou calibrations plus
+récentes, elles ne figurent pas dans ce snapshot PC. Pour réinstaller le logiciel
+du robot, suivre `ros2_robot/README.md` et `docs/ROS2_MIGRATION.md` ; le script
+de déploiement préserve par défaut ses calibrations existantes.
 
-Validation on 2026-11-19: downloaded the pinned commit and packages into a new
-temporary installation, built PyBullet and cuRobo, and passed `uv pip check`
-(101 packages). Verified CUDA tensor execution and initialized the station's
-`Planner` with the retained calibration and rover scene. GPU collision queries
-passed both with existing caches and after compiling Warp kernels into an empty
-cache. No station server or robot commands were started. This validates cuRobo
-reinstallation on this PC, not a fresh ROS installation or hardware operation.
+## Sauvegarde privée et fichiers exclus de GitHub
 
-Only remove `~/hack/curobo-src` after the restoration has passed and these
-instructions are pushed to GitHub. Check that no process uses that environment
-and that the cuRobo source has no local changes. This frees about 8.1 GiB on the
-recorded PC. Keep `~/hack/humanoid-hackathon`, including local data and the CPU
-environment. GPU planning will require running the restore script again.
+Une archive locale complète du dossier `hack` a été créée séparément sur le PC,
+y compris l'ancienne base Station et ses secrets. Elle doit rester privée.
+Le dépôt public ne contient ni `station/station_data/`, ni sa clé de chiffrement,
+ni le jeton `ros2_robot/.station_ws/token`, ni les journaux et captures caméra
+historiques. Ces fichiers ne sont pas requis pour reconstruire le poste ROS actuel.
+Les environnements virtuels, caches et résultats de compilation sont reconstruits.
+
+Aucun fichier du dossier `hack` n'a été supprimé pendant cette sauvegarde.
+
+## Vérifications
+
+La restauration cuRobo a été validée le 19 novembre 2026 avec une installation
+neuve : 101 paquets compatibles, opération CUDA, initialisation du Planner et
+calcul de collision GPU, y compris compilation des kernels dans un cache vide.
+Les vérifications spécifiques à cette sauvegarde portable sont consignées dans
+`restore/VALIDATION.md`. Il ne s'agit pas d'un essai physique sur un autre PC
+ou d'une validation de mouvement du robot.

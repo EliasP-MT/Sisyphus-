@@ -1,7 +1,7 @@
 # humanoid-hackathon
 
-For the pinned cuRobo environment and safe PC cleanup scope, see
-[Recreate the PC setup](docs/RESTORE_PC.md).
+To recreate the PC setup, including saved robot data, pinned CPU/OCR/cuRobo
+environments and the ROS image, see [the restoration guide](docs/RESTORE_PC.md).
 
 ## Robot runtime (ROS 2)
 

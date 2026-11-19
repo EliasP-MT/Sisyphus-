@@ -1,0 +1,10 @@
+# Ubuntu 24.04 x86_64, Python 3.12; snapshot 2026-11-19.
+cadquery-ocp==7.7.2
+ikpy==3.4.2
+mpmath==1.3.0
+numpy==1.26.4
+ompl==2.0.1
+pybullet==3.2.7
+ruckig==0.12.2
+scipy==1.14.1
+sympy==1.14.0

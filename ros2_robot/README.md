@@ -20,4 +20,7 @@ Architecture, safety contract (lease loss, explicit resume, torque rules),
 operations, tests and the hardware validation record:
 [docs/ROS2_MIGRATION.md](../docs/ROS2_MIGRATION.md).
 
-Calibration, poses, scenes and the NormaCore SDK stay outside Git.
+Calibration, poses and scenes are backed up in `restore/robot-data.tar.gz`.
+Run `python3 restore/data.py` after cloning to restore and relocate them.
+The SDK is downloaded at its pinned revision by `scripts/restore_pc.sh`.
+See [the complete PC restoration guide](../docs/RESTORE_PC.md).

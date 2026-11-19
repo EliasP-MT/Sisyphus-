@@ -20,7 +20,14 @@ TILT_ANGLES = (0, 5, -5, 10, -10, 15, -15, 20, -20, 25, -25, 30, -30, 35, -35)
 def _engine():
     from paddleocr import PaddleOCR
 
+    models = Path(__file__).with_name('models.local')
+    model_dirs = {}
+    for key, name in (('text_detection_model_dir', 'PP-OCRv5_mobile_det'),
+                      ('text_recognition_model_dir', 'PP-OCRv5_mobile_rec')):
+        if (models / name).is_dir():
+            model_dirs[key] = str(models / name)
     return PaddleOCR(
+        **model_dirs,
         text_detection_model_name="PP-OCRv5_mobile_det",
         text_recognition_model_name="PP-OCRv5_mobile_rec",
         use_doc_orientation_classify=False,
