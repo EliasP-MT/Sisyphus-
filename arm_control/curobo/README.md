@@ -22,13 +22,19 @@ as a GPU collision accelerator. The robot (RDK) is unchanged: it still receives 
 - Agreement on 3000 poses: 2 GPU-free/exact-collision cases, which the exact check covers, and 7 % false alarms.
 
 ## Install (station PC with an NVIDIA GPU)
+Use the pinned restoration script from the **humanoid-hackathon repository root**:
+
 ```bash
-git clone https://github.com/NVlabs/curobo ~/hack/curobo-src/curobo
-python3 -m venv ~/hack/curobo-src/.venv && ~/hack/curobo-src/.venv/bin/pip install uv
-cd ~/hack/curobo-src/curobo && ../.venv/bin/uv pip install --python ../.venv/bin/python ".[cu13-torch]"
-../.venv/bin/uv pip install --python ../.venv/bin/python ikpy==3.4.2 ruckig==0.12.2 pybullet==3.2.7 ompl==2.0.1 cadquery-ocp==7.7.2 pytest
+bash arm_control/curobo/restore.sh
+```
+
+See [the restoration guide](../../docs/RESTORE_PC.md) for requirements, exact
+versions, local data that must be kept, and moving to another PC. The commands
+below illustrate model regeneration after restoring the SDK and local inputs:
+
+```bash
 ~/hack/curobo-src/.venv/bin/python arm_control/curobo/build_model.py        # if the URDF changed
 ~/hack/curobo-src/.venv/bin/python arm_control/curobo/calibrate_self.py     # after every model rebuild
 ```
-`deploy/station.sh` uses this venv when it exists. `POSTAL_PLANNER_BACKEND=cpu` forces the old pipeline.
+`ros2_robot/deploy/station.sh` uses this venv when it exists. `POSTAL_PLANNER_BACKEND=cpu` forces the old pipeline.
 `elrobot.yml` contains absolute paths for this PC; rebuild it on another machine.

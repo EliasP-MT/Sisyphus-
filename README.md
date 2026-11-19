@@ -1,5 +1,8 @@
 # humanoid-hackathon
 
+For the pinned cuRobo environment and safe PC cleanup scope, see
+[Recreate the PC setup](docs/RESTORE_PC.md).
+
 ## Robot runtime (ROS 2)
 
 The robot runs ROS 2 Humble on its RDK X5; the PC hosts the control station
