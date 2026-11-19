@@ -30,7 +30,7 @@ Install a compatible NVIDIA driver and confirm
 
 ```bash
 mkdir -p ~/hack
-git clone git@github.com:EliasP-MT/humanoid-hackathon.git ~/hack/humanoid-hackathon
+git clone git@github.com:EliasP-MT/Sisyphus-.git ~/hack/humanoid-hackathon
 cd ~/hack/humanoid-hackathon
 bash arm_control/curobo/restore.sh
 ```
