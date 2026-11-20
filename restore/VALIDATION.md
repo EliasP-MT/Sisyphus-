@@ -24,3 +24,9 @@ The cuRobo environment was separately rebuilt from scratch and tested earlier
 the same day, including fresh CUDA kernel compilation (see docs/RESTORE_PC.md).
 No physical second PC or hardware motion was tested. Robot-side state was not
 queried, so the snapshot represents the PC's saved calibration/poses.
+
+On 2026-11-20, a fresh clone from GitHub restored all 54 files and a second run
+changed zero files. Docker pulled the replacement Humble image pinned in the
+guide. A clean build in that image compiled all three ROS packages, and
+`ros2 launch postal_station station.launch.py --show-args` loaded the station
+launch description.
