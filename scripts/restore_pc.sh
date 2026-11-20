@@ -32,7 +32,7 @@ for component in arm ocr; do
   "$envdir/bin/python" -m pip check
 done
 "$PYTHON" restore/models.py
-IMAGE=ghcr.io/epflxplore/base@sha256:5b79ee573136a226081edd39c7f4f6710faf5d8bf1dde7c5d96eb385223ecc65
+IMAGE=ghcr.io/epflxplore/base@sha256:3ee3faca2959b2eeb904babdabff40928d4e2d7d90afa00055e7a78a950b88b4
 docker pull "$IMAGE"
 echo 'CPU planner, OCR models and ROS image restored.'
 echo 'For NVIDIA GPU planning: bash arm_control/curobo/restore.sh'

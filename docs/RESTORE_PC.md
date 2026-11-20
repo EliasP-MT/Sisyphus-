@@ -67,7 +67,13 @@ identiques ou correspondant exactement à la version originale sauvegardée.
 - cuRobo : `71ce1726925adfdcc7d0d39dabec5f2d6bb71acd` de NVlabs/curobo ;
   dépendances dans `arm_control/curobo/requirements-linux-py312.lock`.
 - Image ROS 2 Humble :
-  `ghcr.io/epflxplore/base@sha256:5b79ee573136a226081edd39c7f4f6710faf5d8bf1dde7c5d96eb385223ecc65`.
+  `ghcr.io/epflxplore/base@sha256:3ee3faca2959b2eeb904babdabff40928d4e2d7d90afa00055e7a78a950b88b4`.
+
+L'ancienne image locale du 30 septembre n'est plus téléchargeable sous son
+identifiant enregistré. La restauration utilise donc la version Linux amd64
+du 6 novembre de la même image ROS Humble, figée par son manifeste disponible.
+Ce composant est une version de remplacement, pas une copie binaire de l'ancien
+conteneur. L'image d'origine est conservée sur ce PC.
 
 Le dépôt contient les données spécifiques au robot, mais ne constitue pas un
 miroir hors ligne de Python, Docker, NVIDIA, du SDK ou des modèles OCR. Ces

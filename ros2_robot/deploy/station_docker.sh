@@ -7,7 +7,7 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 REPO=$(cd "$HERE/.." && pwd)
-IMAGE=${STATION_IMAGE:-ghcr.io/epflxplore/base@sha256:5b79ee573136a226081edd39c7f4f6710faf5d8bf1dde7c5d96eb385223ecc65}
+IMAGE=${STATION_IMAGE:-ghcr.io/epflxplore/base@sha256:3ee3faca2959b2eeb904babdabff40928d4e2d7d90afa00055e7a78a950b88b4}
 WS=$HERE/.station_ws
 DESC=$REPO/arm_control/.sdk/hardware/elrobot/simulation
 mkdir -p "$WS/home"
