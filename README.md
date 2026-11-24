@@ -7,9 +7,11 @@
 
 Sisyphus is a low-cost, modular mobile robot for repetitive indoor delivery. Its first use case, **Leukerbad Postman**, autonomously sorted and delivered a stack of letters.
 
-**[Watch the 43-second demo](https://drive.google.com/file/d/1YhX-ApkGoVzBIu0LkoBMFkHpJ2p-o1RC/view?usp=sharing)** · Accelerated footage from the hackathon
+**Hackathon demo** · 43 seconds, accelerated footage
 
-[![Sisyphus holds a letter in front of the labeled mailboxes](docs/images/demo-poster.jpg)](https://drive.google.com/file/d/1YhX-ApkGoVzBIu0LkoBMFkHpJ2p-o1RC/view?usp=sharing)
+https://github.com/user-attachments/assets/c52f17e7-a493-4970-ab95-ac7294413782
+
+[Watch on Google Drive](https://drive.google.com/file/d/1YhX-ApkGoVzBIu0LkoBMFkHpJ2p-o1RC/view?usp=sharing)
 
 *Project status — Hackathon prototype demonstrated in 2026. The team no longer has access to the robot. The code and design notes are available as a reference for future projects.*
 
