@@ -34,16 +34,18 @@ The robot combines a Kiwi drive base, a robotic arm, cameras, and a servo-driven
 
 ![Sisyphus mobile manipulator, showing the arm, dispenser, and drive base](docs/images/robot.jpg)
 
-## Technical reference
+## Repository architecture
 
-| Component | What the repository contains |
+The delivery FSM runs on the control PC. It calls the ROS 2 robot runtime on the RDK X5 for base motion, dispensing, and arm execution. Two local station workers handle vision and arm planning.
+
+| Folder | Role |
 | --- | --- |
-| [Robot and control station](ros2_robot/README.md) | ROS 2 Humble runtime for the RDK X5 and PC-based control station with RViz, a web interface, and arm planning. |
-| [Recipient recognition](base_ocr/README.md) | Base-camera capture and name matching using PP-OCRv5 Mobile. |
-| [Mailbox vision](mailbox_vision/) | Label detection, recipient matching, and slot pose estimation from arm-camera images. |
-| [Arm planning](arm_control/README.md) | Inverse kinematics, trajectory timing, and collision checks using robot CAD. |
-
-The [ROS 2 architecture guide](docs/ROS2_MIGRATION.md), [PC restoration notes](docs/RESTORE_PC.md), and [hardware troubleshooting notes](RDK-TROUBLESHOOTING.md) document the original development setup.
+| [`ros2_robot/`](ros2_robot/README.md) | ROS 2 Humble runtime for the RDK X5 and PC-based control station with RViz, a web interface, and arm planning. |
+| [`base_ocr/`](base_ocr/README.md) | Base-camera capture and name matching using PP-OCRv5 Mobile. |
+| [`mailbox_vision/`](mailbox_vision/) | Label detection, recipient matching, and slot pose estimation from arm-camera images. |
+| [`arm_control/`](arm_control/README.md) | Inverse kinematics, trajectory timing, and collision checks using robot CAD. |
+| [`restore/`](restore/README.md) | Archived calibration, taught poses, model downloads, and pinned dependencies from the control PC. |
+| [`docs/`](docs/) | [ROS 2 runtime architecture](docs/ros2-runtime.md), [RDK troubleshooting](docs/rdk-troubleshooting.md), and project photos. |
 
 ## Team
 

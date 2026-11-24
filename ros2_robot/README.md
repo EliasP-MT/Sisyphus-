@@ -6,7 +6,7 @@ Colcon workspace sources (ROS 2 Humble on both the RDK X5 and the PC container):
 | --- | --- | --- |
 | `postal_robot_interfaces` | both | messages, services, actions |
 | `postal_robot` | RDK | `core` (single servo-bus owner, supervision, base, dispenser, arm execution, poses), `usb_camera`, `robot.launch.py`, `config/robot.yaml` |
-| `postal_station` | PC | `web` (local UI + ROS bridge), `arm_motion` (plan/preview/execute), `station.launch.py`, RViz config, `planner_worker/` (arm_control venv) |
+| `postal_station` | PC | `web` (local UI + ROS bridge), `arm_motion` (plan/preview/execute), `station.launch.py`, RViz config, [`deliver_all` mission](postal_station/postal_station/tasks.py), `planner_worker/` (arm_control venv), `ocr_worker/` (base_ocr venv) |
 | `deploy/` | PC | `deploy_robot.sh`, `postal-robot.service`, `station.sh`, `station_docker.sh`, Fast DDS profile template |
 
 Quick start:
@@ -18,9 +18,9 @@ ROBOT_WIFI_IP=172.20.10.3 bash ros2_robot/deploy/station.sh                     
 
 Architecture, safety contract (lease loss, explicit resume, torque rules),
 operations, tests and the hardware validation record:
-[docs/ROS2_MIGRATION.md](../docs/ROS2_MIGRATION.md).
+[docs/ros2-runtime.md](../docs/ros2-runtime.md).
 
 Calibration, poses and scenes are backed up in `restore/robot-data.tar.gz`.
 Run `python3 restore/data.py` after cloning to restore and relocate them.
-The SDK is downloaded at its pinned revision by `scripts/restore_pc.sh`.
-See [the complete PC restoration guide](../docs/RESTORE_PC.md).
+The SDK is downloaded at its pinned revision by `restore/setup_pc.sh`.
+See [the complete PC restoration guide](../restore/README.md).

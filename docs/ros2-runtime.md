@@ -1,10 +1,10 @@
-# Migration ROS 2 du robot postal
+# Architecture et exploitation du robot postal
 
 Ce document décrit l'architecture livrée, son exploitation (RDK et PC), le
 contrat de sécurité et l'état réel de validation. Les anciens outils basés sur
 Station (Station, `arm-view`, `teleop`, `calibration_ui`, `hand_control`,
 exécuteur et commissionnement d'`arm_control`) ont été supprimés après
-validation, à la demande de l'utilisateur ; ils restent dans l'historique Git
+validation et sont conservés dans l'historique Git
 (dernier commit les contenant : `934b2b0`).
 
 ## 1. Architecture
@@ -152,7 +152,7 @@ PC (Ubuntu 24.04)                                RDK X5 (Ubuntu 22.04, aarch64)
 
 Mise à jour du 19 novembre 2026 : les calibrations, poses et scènes du PC sont
 maintenant sauvegardées dans `restore/robot-data.tar.gz`. Leurs copies de travail
-restent ignorées par Git. Voir [la restauration portable](RESTORE_PC.md).
+restent ignorées par Git. Voir [la restauration portable](../restore/README.md).
 Les secrets et l'ancienne base Station restent exclus du dépôt public.
 
 | Donnée | PC | RDK |
@@ -219,7 +219,7 @@ le distributeur : activer le couple, saisir une durée (obligatoire), puis « Ru
 ### Dépannage
 
 * Pas d'état robot : vérifier le Wi-Fi, `ROS_DOMAIN_ID=43`, le service. Si
-  l'Ethernet ne répond plus, appliquer d'abord `RDK-TROUBLESHOOTING.md`
+  l'Ethernet ne répond plus, appliquer d'abord [les notes de dépannage RDK](rdk-troubleshooting.md)
   (`nmcli connection down/up rdk-direct`).
 * Planification refusée « outside the operating margin » : la position mesurée
   est hors des marges de calibration (par exemple au repos J2 = 1010 < 1012).

@@ -28,7 +28,7 @@ Use the pinned restoration script from the **humanoid-hackathon repository root*
 bash arm_control/curobo/restore.sh
 ```
 
-See [the restoration guide](../../docs/RESTORE_PC.md) for requirements, exact
+See [the restoration guide](../../restore/README.md) for requirements, exact
 versions, local data that must be kept, and moving to another PC. The commands
 below illustrate model regeneration after restoring the SDK and local inputs:
 

@@ -21,7 +21,7 @@
 CPU/OCR runtime checks reused the existing Python environments as interpreters;
 they did not reinstall those packages or simulate a fresh operating system.
 The cuRobo environment was separately rebuilt from scratch and tested earlier
-the same day, including fresh CUDA kernel compilation (see docs/RESTORE_PC.md).
+the same day, including fresh CUDA kernel compilation (see restore/README.md).
 No physical second PC or hardware motion was tested. Robot-side state was not
 queried, so the snapshot represents the PC's saved calibration/poses.
 

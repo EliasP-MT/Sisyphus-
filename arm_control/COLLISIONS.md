@@ -127,7 +127,7 @@ doivent avoir leur pose actualisée dans `base_link` après un déplacement.
 
 L'exécution passe par la station ROS 2 : le planner worker charge la scène
 (`station.sh` : variable `SCENE`), le robot exécute la trajectoire validée.
-Voir `docs/ROS2_MIGRATION.md`.
+Voir `docs/ros2-runtime.md`.
 
 ## Limites pratiques
 

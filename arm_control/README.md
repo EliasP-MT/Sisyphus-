@@ -21,7 +21,7 @@ cd arm_control && .venv/bin/python -m unittest test_arm test_collision test_simp
 Local data (never committed): the verified calibration
 `calibration-candidate-*.local.json`, `poses*.local.json`, scenes under
 `assets/rover-fixed.local/`. Execution on the robot, pose capture and
-calibration-protected motion are documented in `docs/ROS2_MIGRATION.md`.
+calibration-protected motion are documented in `docs/ros2-runtime.md`.
 
 The Station-based calibration UI, commissioning and executor tools were removed
 (still in Git history up to commit 934b2b0). Recalibrating the arm

@@ -38,7 +38,7 @@ sont pas inclus dans ce dépôt public.
 mkdir -p ~/hack
 git clone https://github.com/EliasP-MT/Sisyphus-.git ~/hack/humanoid-hackathon
 cd ~/hack/humanoid-hackathon
-bash scripts/restore_pc.sh
+bash restore/setup_pc.sh
 # Option GPU, nécessaire pour retrouver l'accélération cuRobo :
 bash arm_control/curobo/restore.sh
 ```
@@ -115,7 +115,7 @@ une interface Wi-Fi ou un accès SSH ne se restaurent pas à partir de l'ancien 
 Cette sauvegarde porte sur le poste PC et ses données. L'état actuel du RDK n'a
 pas été interrogé ni modifié : s'il contient des poses ou calibrations plus
 récentes, elles ne figurent pas dans ce snapshot PC. Pour réinstaller le logiciel
-du robot, suivre `ros2_robot/README.md` et `docs/ROS2_MIGRATION.md` ; le script
+du robot, suivre `ros2_robot/README.md` et `docs/ros2-runtime.md` ; le script
 de déploiement préserve par défaut ses calibrations existantes.
 
 ## Sauvegarde privée et fichiers exclus de GitHub
