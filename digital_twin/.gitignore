@@ -1,4 +1,0 @@
-.runtime/
-.venv/
-.pip.pyz
-*.local.json

@@ -5,7 +5,8 @@ import unittest
 import cv2
 import numpy as np
 
-from letterbox_locator import HERE, LetterboxLocator, detect_labels, load_json, match_recipient
+from letterbox_locator import HERE, LetterboxLocator, detect_labels, load_json
+from recipient_names import match_recipient
 
 GEOMETRY = load_json(HERE / "config/letterbox.json")
 CAL = dict(
@@ -81,7 +82,7 @@ def expected_slot(rvec, tvec):
 
 class LocatorTests(unittest.TestCase):
     def setUp(self):
-        self.locator = LetterboxLocator(CAL, GEOMETRY, ocr=False)
+        self.locator = LetterboxLocator(CAL, GEOMETRY)
 
     def test_slot_centre_at_several_poses(self):
         poses = [
@@ -90,7 +91,7 @@ class LocatorTests(unittest.TestCase):
             ([-0.2, 0.3, -0.08], [-0.06, -0.05, 0.30]),
         ]
         for rvec, tvec in poses:
-            result = self.locator.locate(render(rvec, tvec))
+            result = self.locator.locate_all(render(rvec, tvec))[0]
             self.assertIsNotNone(result, f"label not found at {rvec}, {tvec}")
             label = np.array([LABEL_CX, LABEL_CY, 0.0])
             r = cv2.Rodrigues(np.asarray(rvec, float))[0]
@@ -124,7 +125,7 @@ class LocatorTests(unittest.TestCase):
         # parallel to the label's, whatever tilt the 3D pose estimate happens to carry.
         for tvec in ([-0.1, -0.04, 0.35], [-0.08, -0.03, 0.30], [-0.12, -0.05, 0.40]):
             image = render([0, 0, 0], tvec)
-            result = self.locator.locate(image)
+            result = self.locator.locate_all(image)[0]
             outline = slot_outline_px(result, CAL, GEOMETRY)[:4]
             top, bottom = outline[1] - outline[0], outline[2] - outline[3]
             left, right = outline[3] - outline[0], outline[2] - outline[1]
@@ -139,10 +140,10 @@ class LocatorTests(unittest.TestCase):
             self.assertLess(np.linalg.norm(slot_px - expected.reshape(2)), 3.0)
 
     def test_no_label(self):
-        self.assertIsNone(self.locator.locate(np.full((480, 640, 3), 128, np.uint8)))
+        self.assertEqual(self.locator.locate_all(np.full((480, 640, 3), 128, np.uint8)), [])
 
     def test_recipient_matching_tolerates_ocr_errors(self):
-        names = load_json(HERE / "config/recipients.json")
+        names = load_json(HERE.parent / "base_ocr/recipients.json")
         self.assertEqual(match_recipient("Jan Smith", names)[0], "Jan Smith")
         self.assertEqual(match_recipient("Yuki Tanaka", names)[0], "Yuki Tanaka")
         self.assertEqual(match_recipient("lvan Petr0v", names)[0], "Ivan Petrov")

@@ -21,12 +21,13 @@ import cv2
 import numpy as np
 
 BASE_OCR = Path(__file__).resolve().parents[3] / 'base_ocr'
-SLAM = Path(__file__).resolve().parents[3] / 'slam'
+MAILBOX_VISION = Path(__file__).resolve().parents[3] / 'mailbox_vision'
 sys.path.insert(0, str(BASE_OCR))
 import ocr_base  # noqa: E402
 
-# The SLAM label detector (appended AFTER base_ocr: both directories have an ocr_base.py).
-sys.path.append(str(SLAM))
+sys.path.append(str(MAILBOX_VISION))
+from recipient_names import match_recipient  # noqa: E402
+
 _LOCATOR = {}
 
 
@@ -34,9 +35,9 @@ def mailbox_detector():
     """LetterboxLocator for the arm camera (camera 2), geometry only (no OCR)."""
     if not _LOCATOR:
         import letterbox_locator as ll
-        calibration = ll.load_json(SLAM / 'config/arm-camera-intrinsics.json')
-        geometry = ll.load_json(SLAM / 'config/letterbox.json')
-        _LOCATOR.update(locator=ll.LetterboxLocator(calibration, geometry, ocr=False), ll=ll,
+        calibration = ll.load_json(MAILBOX_VISION / 'config/arm-camera-intrinsics.json')
+        geometry = ll.load_json(MAILBOX_VISION / 'config/letterbox.json')
+        _LOCATOR.update(locator=ll.LetterboxLocator(calibration, geometry), ll=ll,
                         calibration=calibration, geometry=geometry)
     return _LOCATOR
 
@@ -60,7 +61,7 @@ def read_label_text(crop):
 def detect_mailboxes(frame, read_names=True):
     """Detect every mailbox label in one frame (+ read its name): contours drawn + a list."""
     d = mailbox_detector()
-    results = d['locator'].locate_all(frame, read_names=False)
+    results = d['locator'].locate_all(frame)
     names = json.loads(ocr_base.NAMES_PATH.read_text()) if read_names else []
     drawn = frame.copy()
     labels = []
@@ -77,7 +78,7 @@ def detect_mailboxes(frame, read_names=True):
                 text = read_label_text(d['ll'].rectify_label(frame, turned, d['geometry']))
                 if turns == 0:
                     first_text = text
-                found, found_score = d['ll'].match_recipient(text, names)
+                found, found_score = match_recipient(text, names)
                 if found:
                     quarter_turns, ocr_text, name, score = turns, text, found, found_score
                     break

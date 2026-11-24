@@ -13,8 +13,8 @@ class KiwiTests(unittest.TestCase):
         for r in rates:
             self.assertAlmostEqual(r, .125 / .05)
 
-    def test_matches_digital_twin_convention(self):
-        # digital_twin/common.py: angles = mount - 90 deg; rows [cos, sin, R] / r
+    def test_matches_lekiwi_convention(self):
+        # LeKiwi convention: angles = mount - 90 deg; rows [cos, sin, R] / r
         vx, vy, wz = .1, -.05, .3
         for (m, rate) in zip((240, 0, 120), self.k.wheel_rates(vx, vy, wz)):
             a = math.radians(m - 90)

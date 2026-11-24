@@ -1,5 +1,0 @@
--r ../arm_control/requirements-collision.txt
-mujoco==3.3.7
-gymnasium==1.2.2
-scikit-image==0.25.2
-coacd==1.0.5

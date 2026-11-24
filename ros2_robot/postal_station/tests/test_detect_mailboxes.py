@@ -2,7 +2,6 @@
 Needs OpenCV/numpy (run with base_ocr/.venv/bin/python)."""
 import base64
 import importlib.util
-import sys
 import unittest
 from pathlib import Path
 
@@ -19,8 +18,6 @@ ROOT = Path(__file__).resolve().parents[3]
 class DetectTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        sys.path.insert(0, str(ROOT / 'slam'))
-        sys.path.insert(0, str(ROOT / 'base_ocr'))
         spec = importlib.util.spec_from_file_location('ocr_worker_under_test', ROOT / 'ros2_robot/postal_station/ocr_worker/worker.py')
         cls.worker = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.worker)

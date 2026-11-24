@@ -1,4 +1,4 @@
-"""Three-wheel Kiwi base kinematics, same LeKiwi convention as digital_twin/common.py.
+"""Three-wheel Kiwi base kinematics, using the LeKiwi convention.
 
 Wheel order is (left, back, right) with mounting angles (240, 0, 120) degrees.
 Wheel radius 0.05 m and centre-wheel distance 0.125 m were confirmed by the

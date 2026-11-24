@@ -1,15 +1,11 @@
-"""Locate a letterbox slot from its name label and read the recipient name.
-
-Two separate APIs: locate_all(image) is geometry-only and finds every label;
-read_label_name(image, corners) performs lazy OCR and recipient matching.
-locate(image) retains the legacy largest-label combined behavior.
+"""Locate mailbox slots from their name labels.
 
 Pipeline (one image):
   1. find the label: a quadrilateral with a single thick black border and a
      light interior (the slot is dark inside, so it is rejected);
   2. solvePnP with the label's real size -> label pose in the camera frame;
   3. add the fixed label->slot offset (config/letterbox.json) -> slot centre;
-  4. OCR the rectified label interior and match it against config/recipients.json.
+  4. Provide the label corners for OCR in the station worker.
 
 Camera frame = OpenCV optical frame: x right, y down, z forward, metres.
 Label frame: origin at the label centre, x right, y down, z into the box.
@@ -17,16 +13,12 @@ The slot normal returned is the direction to push the letter (into the box).
 Converting to the arm base frame needs the camera mounting + arm FK (not here).
 """
 
-import argparse
 import json
-import sys
 import time
 from pathlib import Path
 
 import cv2
 import numpy as np
-
-from recipient_names import match_recipient
 
 HERE = Path(__file__).resolve().parent
 
@@ -161,12 +153,6 @@ def label_pose_candidates(corners, calibration, geometry):
             )
         )
     return sorted(candidates, key=lambda candidate: candidate["reprojection_px"])
-
-
-def slot_pose(corners, calibration, geometry):
-    """Best single candidate; mapping callers should retain label_pose_candidates."""
-    candidates = label_pose_candidates(corners, calibration, geometry)
-    return candidates[0] if candidates else None
 
 
 def _similarity(source, target):
@@ -325,16 +311,11 @@ def rectify_label(image, corners, geometry, scale_px_per_m=6000, inset=0.12):
 
 
 class LetterboxLocator:
-    def __init__(self, calibration, geometry=None, recipients=None, ocr=True):
+    def __init__(self, calibration, geometry=None):
         self.calibration = (
             load_json(calibration) if isinstance(calibration, (str, Path)) else calibration
         )
         self.geometry = load_json(HERE / "config/letterbox.json") if geometry is None else geometry
-        self.recipients = (
-            load_json(HERE / "config/recipients.json") if recipients is None else recipients
-        )
-        self.ocr = None
-        self.ocr_enabled = bool(ocr)
 
     def _check_image(self, image):
         h, w = image.shape[:2]
@@ -344,35 +325,8 @@ class LetterboxLocator:
                 f"{self.calibration['width']}x{self.calibration['height']}"
             )
 
-    def read_text(self, crop):
-        if not self.ocr_enabled:
-            raise ValueError("Name reading disabled; construct with ocr=True")
-        if self.ocr is None:
-            from ocr_arm import ArmOCR
-
-            self.ocr = ArmOCR(device=None, max_seconds=30.0, min_confidence=0.3)
-        try:
-            groups = self.ocr.read_text(crop)
-        except TimeoutError:
-            groups = self.ocr.last_detections
-        return " ".join(g["text"] for g in groups)
-
-    def read_label_name(self, image, corners):
-        """Read ONLY this geometrically selected label, then match the database.
-
-        OCR initialization is lazy: geometry discovery never loads its model.
-        Unknown/near-tied database matches return recipient=None.
-        """
-        self._check_image(image)
-        start = time.perf_counter()
-        text = self.read_text(rectify_label(image, np.asarray(corners, np.float32), self.geometry))
-        name, score = match_recipient(text, self.recipients)
-        return dict(
-            ocr_text=text, recipient=name, match_score=score, ocr_s=time.perf_counter() - start
-        )
-
-    def locate_all(self, image, *, read_names=False):
-        """Geometry for ALL labels; optionally read names as a separate stage.
+    def locate_all(self, image):
+        """Estimate geometry for every detected label.
 
         Slot positions are predictions from the measured fixed label/slot offset,
         not independently detected holes. pose_candidates retains planar ambiguity.
@@ -391,157 +345,5 @@ class LetterboxLocator:
                 pose_candidates=candidates,
             )
             result["geometry_s"] = time.perf_counter() - start
-            if read_names:
-                result.update(self.read_label_name(image, corners))
             results.append(result)
         return results
-
-    def locate(self, image):
-        """Legacy API: largest label, with names if OCR was enabled."""
-        results = self.locate_all(image, read_names=self.ocr_enabled)
-        return results[0] if results else None
-
-    def annotate(self, image, result):
-        out = image.copy()
-        if result is None:
-            cv2.putText(out, "no label", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
-            return out
-        cv2.polylines(out, [np.int32(result["label_corners_px"])], True, (0, 200, 0), 2)
-        outline = slot_outline_px(result, self.calibration, self.geometry, image)
-        cv2.polylines(out, [np.int32(outline[:4])], True, (0, 0, 255), 2)
-        cv2.circle(out, tuple(np.int32(outline[4])), 5, (0, 0, 255), -1)
-        x, y, z = result["slot_center_m"]
-        lines = [
-            f"slot x={x * 100:+.1f} y={y * 100:+.1f} z={z * 100:.1f} cm  ({result['distance_m'] * 100:.1f} cm)",
-            f"reproj {result['reprojection_px']:.2f}px  box area {result['label_area_px2']:.0f} px^2",
-        ]
-        if "ocr_text" in result:
-            lines.append(
-                f'ocr "{result["ocr_text"]}" -> {result["recipient"]} ({result["match_score"]:.2f})'
-            )
-        for i, text in enumerate(lines):
-            cv2.putText(out, text, (10, 25 + 24 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 4)
-            cv2.putText(
-                out, text, (10, 25 + 24 * i), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1
-            )
-        return out
-
-
-# --------------------------------------------------------------------------
-# CLI: single image, or live webcam with a browser preview
-# --------------------------------------------------------------------------
-def _serve_mjpeg(locator, device, port, width, height):
-    import threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-
-    cap = cv2.VideoCapture(int(device) if str(device).isdecimal() else device)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-    if not cap.isOpened():
-        raise RuntimeError(f"Cannot open camera {device}")
-    latest = dict(jpeg=None, result=None)
-    lock = threading.Lock()
-
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            if self.path == "/result.json":
-                with lock:
-                    body = json.dumps(latest["result"]).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(body)
-                return
-            if self.path != "/stream":
-                body = b'<html><body style="margin:0;background:#111"><img src="/stream" style="width:100%"></body></html>'
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html")
-                self.end_headers()
-                self.wfile.write(body)
-                return
-            self.send_response(200)
-            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
-            self.end_headers()
-            try:
-                while True:
-                    with lock:
-                        jpeg = latest["jpeg"]
-                    if jpeg:
-                        self.wfile.write(
-                            b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg + b"\r\n"
-                        )
-                    time.sleep(0.1)
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-
-        def log_message(self, *_):
-            pass
-
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"Preview: http://127.0.0.1:{port}  (Ctrl+C to stop)", file=sys.stderr)
-    try:
-        while True:
-            for _ in range(2):
-                cap.grab()  # drop stale buffered frames
-            ok, frame = cap.read()
-            if not ok:
-                raise RuntimeError("Camera read failed")
-            result = locator.locate(frame)
-            ok, jpeg = cv2.imencode(".jpg", locator.annotate(frame, result))
-            with lock:
-                latest.update(jpeg=jpeg.tobytes(), result=result)
-            if result:
-                print(
-                    json.dumps(
-                        {
-                            k: result[k]
-                            for k in ("slot_center_m", "distance_m", "reprojection_px")
-                            if k in result
-                        }
-                        | {k: result.get(k) for k in ("ocr_text", "recipient")}
-                    )
-                )
-    finally:
-        cap.release()
-        server.shutdown()
-
-
-def main(argv=None):
-    parser = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
-    parser.add_argument(
-        "--calibration",
-        required=True,
-        help="Camera intrinsics JSON (e.g. config/webcam-intrinsics.json)",
-    )
-    parser.add_argument("--image", help="Process one saved image")
-    parser.add_argument("--device", help="Live camera: /dev/videoN or index")
-    parser.add_argument("--port", type=int, default=8770)
-    parser.add_argument(
-        "--no-ocr", action="store_true", help="Geometry only (fast, no PaddleOCR needed)"
-    )
-    parser.add_argument("--save", help="With --image: write the annotated image here")
-    args = parser.parse_args(argv)
-    if bool(args.image) == bool(args.device):
-        parser.error("give exactly one of --image or --device")
-    locator = LetterboxLocator(args.calibration, ocr=not args.no_ocr)
-    if args.image:
-        image = cv2.imread(args.image)
-        if image is None:
-            parser.error(f"cannot read {args.image}")
-        result = locator.locate(image)
-        print(json.dumps(result, indent=2))
-        if args.save:
-            cv2.imwrite(args.save, locator.annotate(image, result))
-    else:
-        cal = locator.calibration
-        try:
-            _serve_mjpeg(locator, args.device, args.port, cal["width"], cal["height"])
-        except KeyboardInterrupt:
-            pass
-
-
-if __name__ == "__main__":
-    main()

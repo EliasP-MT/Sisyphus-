@@ -33,18 +33,13 @@ PC (Ubuntu 24.04)                                RDK X5 (Ubuntu 22.04, aarch64)
   pybullet à compiler, réseau du partage de connexion ≈ 30 kB/s). Le code
   `arm_control/planner.py` et `collision.py` est réutilisé **sans modification**.
   Le robot exécute et surveille seul les trajectoires reçues.
-* **Matériel et simulation sont séparés** : le matériel est sur
-  `ROS_DOMAIN_ID=43`, espace `/robot`. Le jumeau MuJoCo (`digital_twin`) publie
-  sous `/postal_sim` et doit tourner dans un autre domaine ; ses positions ne
-  sont jamais du retour matériel. Le double de test `device:=sim://` (servos
-  simulés au niveau octet, tests uniquement) est signalé dans chaque état
-  publié.
-* **Navigation et FSM futures** : la base consomme `geometry_msgs/Twist` sur
-  `/robot/base/cmd_vel` et publie l'odométrie roues sur `/robot/base/odom`.
-  Le TF `odom` n'est pas diffusé par défaut (`publish_odom_tf: false`) : le futur
-  merge navigation décidera de son propriétaire. Une FSM pourra appeler
-  `/station/arm/plan_to_pose` et `/station/arm/go_to_pose`, ainsi que les
-  services du robot. Aucun scénario autonome n'est implémenté.
+* **Matériel et tests** : le matériel est sur `ROS_DOMAIN_ID=43`, espace
+  `/robot`. Le double de test `device:=sim://` simule les servos au niveau
+  octet et se signale dans chaque état publié.
+* **Mission de livraison** : la FSM `deliver_all` de la station relève les
+  noms des boîtes, lit chaque lettre et repère la fente correspondante. La
+  station commande la base via `/robot/base/cmd_vel` et utilise l’odométrie
+  des roues sur `/robot/base/odom` pour avancer et reculer de distances configurées.
 
 ## 2. Interfaces (`postal_robot_interfaces`)
 
@@ -271,7 +266,7 @@ famine du moniteur de collision de la station.
 
 * **La planification dépend du PC.** Sans station, le robot ne peut pas
   rejoindre une pose : il faudra porter pybullet/OMPL/ruckig sur aarch64 ou
-  embarquer des plans pré-validés pour la future FSM.
+  embarquer des plans pré-validés pour la FSM.
 * Poses : `horizontal` est en collision dans la scène (−0,7 mm sous la marge)
   et doit être recapturée. La position de repos est hors des marges de
   calibration.

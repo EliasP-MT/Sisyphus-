@@ -17,14 +17,16 @@ https://github.com/user-attachments/assets/c52f17e7-a493-4970-ab95-ac7294413782
 
 ## From stack to mailbox
 
-The robot picked up a letter, read the recipient’s name with a camera, and matched it to a mailbox label. Its three-wheel omnidirectional base navigated to the mailbox and could move sideways to line up for delivery. The arm deposited the letter, then the robot repeated the process until the stack was empty.
+The [delivery FSM](ros2_robot/postal_station/postal_station/tasks.py) surveys the mailbox labels before picking up the first letter. It reads each recipient’s name and checks it against the survey. The base approaches by a configured distance using wheel odometry, then the arm camera locates the matching slot. The arm inserts the letter and retreats before the next cycle.
 
 ~~~mermaid
 flowchart LR
-    Stack["Feed and pick a letter"] --> OCR["Read recipient name"]
+    Survey["Survey mailbox labels"] --> Stack["Feed and pick a letter"]
+    Stack --> OCR["Read recipient name"]
     OCR --> Match["Match name to mailbox"]
-    Match --> Drive["Navigate and align"]
-    Drive --> Deliver["Deposit letter"]
+    Match --> Drive["Approach using wheel odometry"]
+    Drive --> Locate["Locate the matching slot"]
+    Locate --> Deliver["Insert letter and retreat"]
     Deliver -->|More letters| Stack
 ~~~
 
@@ -38,9 +40,8 @@ The robot combines a Kiwi drive base, a robotic arm, cameras, and a servo-driven
 | --- | --- |
 | [Robot and control station](ros2_robot/README.md) | ROS 2 Humble runtime for the RDK X5 and PC-based control station with RViz, a web interface, and arm planning. |
 | [Recipient recognition](base_ocr/README.md) | Base-camera capture and name matching using PP-OCRv5 Mobile. |
-| [Mapping and mailbox vision](slam/README.md) | Indoor mapping, mailbox localization, and label reading. |
+| [Mailbox vision](mailbox_vision/) | Label detection, recipient matching, and slot pose estimation from arm-camera images. |
 | [Arm planning](arm_control/README.md) | Inverse kinematics, trajectory timing, and collision checks using robot CAD. |
-| [MuJoCo digital twin](digital_twin/README.md) | Simulation of navigation and arm motion. The default scene runs a navigation tour of six mailboxes. |
 
 The [ROS 2 architecture guide](docs/ROS2_MIGRATION.md), [PC restoration notes](docs/RESTORE_PC.md), and [hardware troubleshooting notes](RDK-TROUBLESHOOTING.md) document the original development setup.
 

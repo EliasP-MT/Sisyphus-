@@ -8,8 +8,7 @@ Used by the ROS 2 station planner worker
 | `planner.py` | calibration validation, tick/radian conversion (refused, never clipped), IK (ikpy), Ruckig timing, joint/linear plans |
 | `collision.py` | PyBullet collision world, scene validation and fingerprints, OMPL RRTConnect joint paths |
 | `cad.py`, `import_surface_cad.py`, `inspect_cad_assembly.py`, `simplify_collision.py` | STEP/surface CAD import and collision proxies |
-| `build_rover_scene.py`, `register_scene.py`, `benchmark_proxy.py` | rover scene construction, CAD-to-arm registration, proxy benchmarks |
-| `plan_recorded.py` | offline preview between recorded poses (no hardware) |
+| `build_rover_scene.py`, `register_scene.py` | rover scene construction and CAD-to-arm registration |
 | `COLLISIONS.md` | scene format, margins and validation rules |
 
 Setup (virtual environment + NormaCore ElRobot URDF/meshes in `.sdk/`):
