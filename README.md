@@ -1,42 +1,46 @@
 # Sisyphus
 
-Sisyphus is a low-cost, modular mobile robot for repetitive indoor delivery work. At the 2026 Leukerbad Robotics Hackathon, its first delivery job was sorting the mail. The **Leukerbad Postman** prototype won both the **Autonomous Urban Services track** and the **overall Grand Final**.
+Sisyphus is a low-cost, modular mobile robot for repetitive indoor delivery. Its first use case, **Leukerbad Postman**, autonomously sorted and delivered a stack of letters. The team won the **Autonomous Urban Services track** and the **overall Grand Final** at the 2026 Leukerbad Robotics Hackathon.
 
-![The Sisyphus mobile manipulation robot at the Leukerbad Robotics Hackathon](docs/images/robot.jpg)
+**[Watch the 43-second demo](docs/media/leukerbad-postman.mp4)** · Accelerated footage from the hackathon
 
-## A letter from stack to mailbox
+[![Sisyphus holds a letter in front of the labeled mailboxes](docs/images/demo-poster.jpg)](docs/media/leukerbad-postman.mp4)
 
-The demonstration started with a stack of addressed letters. Sisyphus picked up one letter, read the recipient’s name, identified the matching mailbox, drove to it and deposited the letter. It returned for the next letter and repeated the cycle until the stack was empty.
+*Project status — Hackathon prototype demonstrated in 2026. The team no longer has access to the robot. The code and design notes are available as a reference for future projects.*
 
-Three parts of the design make that job possible. The three-wheel Kiwi base can move sideways to line up with a mailbox. Camera-based optical character recognition (OCR) turns a printed name into a destination. A robotic arm and servo-driven dispenser handle the envelopes. The team designed the base around interchangeable tools and payloads, with medicine and tray delivery as possible future applications.
+## From stack to mailbox
 
-## Inside the repository
+The robot picked up a letter, read the recipient’s name with a camera, and matched it to a mailbox label. Its three-wheel omnidirectional base navigated to the mailbox and could move sideways to line up for delivery. The arm deposited the letter, then the robot repeated the process until the stack was empty.
 
-| Component | What you’ll find |
+~~~mermaid
+flowchart LR
+    Stack["Feed and pick a letter"] --> OCR["Read recipient name"]
+    OCR --> Match["Match name to mailbox"]
+    Match --> Drive["Navigate and align"]
+    Drive --> Deliver["Deposit letter"]
+    Deliver -->|More letters| Stack
+~~~
+
+The robot combines a Kiwi drive base, a robotic arm, cameras, and a servo-driven envelope dispenser. The modular design also explored interchangeable tools and payloads for tasks like delivering medicine or trays.
+
+![Sisyphus mobile manipulator, showing the arm, dispenser, and drive base](docs/images/robot.jpg)
+
+## Technical reference
+
+| Component | What the repository contains |
 | --- | --- |
-| [Robot and control station](ros2_robot/README.md) | ROS 2 Humble packages for the RDK X5 onboard computer and the operator’s PC. The robot controls the servos and camera. The PC hosts the web interface, RViz and arm planner. |
-| [Recipient recognition](base_ocr/README.md) | Base-camera capture and name matching with PP-OCRv5 Mobile. An ambiguous reading returns an empty result so the caller can distinguish it from a match. |
-| [Mapping and mailbox vision](slam/README.md) | Tools for mapping the indoor space, locating mailboxes and reading their labels. |
-| [Arm planning](arm_control/README.md) | Inverse kinematics, trajectory timing and collision checks using the robot’s CAD geometry. |
-| [MuJoCo simulation](digital_twin/README.md) | A digital twin for exercising navigation and arm motion without physical hardware. |
+| [Robot and control station](ros2_robot/README.md) | ROS 2 Humble runtime for the RDK X5 and PC-based control station with RViz, a web interface, and arm planning. |
+| [Recipient recognition](base_ocr/README.md) | Base-camera capture and name matching using PP-OCRv5 Mobile. |
+| [Mapping and mailbox vision](slam/README.md) | Indoor mapping, mailbox localization, and label reading. |
+| [Arm planning](arm_control/README.md) | Inverse kinematics, trajectory timing, and collision checks using robot CAD. |
+| [MuJoCo digital twin](digital_twin/README.md) | Simulation of navigation and arm motion. The default scene runs a navigation tour of six mailboxes. |
 
-## Try the simulation
-
-From the repository root on Linux, set up the digital twin and run its default mission.
-
-```bash
-bash digital_twin/setup.sh
-bash digital_twin/run.sh --scenario mission
-```
-
-The supplied scene contains six mailboxes and zero letters, so this command runs a navigation tour. Add `--viewer` to watch it in an OpenGL session. The [digital twin guide](digital_twin/README.md) describes the other scenarios and the model’s calibration limits.
-
-For the physical robot, start with the [deployment instructions](ros2_robot/README.md). The [ROS 2 architecture guide](docs/ROS2_MIGRATION.md) covers supervision and operation, the [PC restoration guide](docs/RESTORE_PC.md) lists pinned dependencies and saved robot data, and the [hardware notes](RDK-TROUBLESHOOTING.md) document servo IDs and Ethernet troubleshooting.
+The [ROS 2 architecture guide](docs/ROS2_MIGRATION.md), [PC restoration notes](docs/RESTORE_PC.md), and [hardware troubleshooting notes](RDK-TROUBLESHOOTING.md) document the original development setup.
 
 ## Team
 
-Evan Ayoub, Balthazar Bolze, Jérôme Courdacy, Vincent Lellu, Martin Mayer and Elias Pajot built Sisyphus for the Leukerbad Robotics Hackathon.
+Evan Ayoub, Balthazar Bolze, Jérôme Courdacy, Vincent Lellu, Martin Mayer, and Elias Pajot built Sisyphus at the Leukerbad Robotics Hackathon.
 
 ![The Sisyphus team at the Leukerbad Robotics Hackathon](docs/images/team.jpg)
 
-Thank you to the Edelweiss Innovation & Intelligence Institute (EIII), Pedro Jinjun Dong and EuroTech Federation for organizing the event.
+Thank you to the Edelweiss Innovation & Intelligence Institute (EIII), Pedro Jinjun Dong, and EuroTech Federation for organizing the event.
