@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/c52f17e7-a493-4970-ab95-ac7294413782
 
 [Watch on Google Drive](https://drive.google.com/file/d/1YhX-ApkGoVzBIu0LkoBMFkHpJ2p-o1RC/view?usp=sharing)
 
-*Project status — Hackathon prototype demonstrated in 2026. The team no longer has access to the robot. The code and design notes are available as a reference for future projects.*
+*Project status — Hackathon prototype demonstrated in 2026.*
 
 ## From stack to mailbox
 
