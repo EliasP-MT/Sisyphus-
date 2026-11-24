@@ -1,6 +1,11 @@
 # Sisyphus
 
-Sisyphus is a low-cost, modular mobile robot for repetitive indoor delivery. Its first use case, **Leukerbad Postman**, autonomously sorted and delivered a stack of letters. The team won the **Autonomous Urban Services track** and the **overall Grand Final** at the 2026 Leukerbad Robotics Hackathon.
+> **Built in 48 hours at the 2026 Leukerbad Robotics Hackathon**
+>
+> - **1st place in the Autonomous Urban Services track**
+> - **1st place overall in the Grand Final**
+
+Sisyphus is a low-cost, modular mobile robot for repetitive indoor delivery. Its first use case, **Leukerbad Postman**, autonomously sorted and delivered a stack of letters.
 
 **[Watch the 43-second demo](https://drive.google.com/file/d/1YhX-ApkGoVzBIu0LkoBMFkHpJ2p-o1RC/view?usp=sharing)** · Accelerated footage from the hackathon
 
